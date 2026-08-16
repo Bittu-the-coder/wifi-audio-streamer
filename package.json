@@ -1,0 +1,37 @@
+{
+  "name": "wifi-audio-stream",
+  "version": "1.0.0",
+  "description": "Stream your laptop's audio to multiple phones over local WiFi — no app installs, phones just open a URL in their browser.",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "gen:audio": "node scripts/generate-test-audio.mjs",
+    "test": "node --test",
+    "list:devices": "node scripts/list-audio-devices.mjs",
+    "check:setup": "node scripts/doctor.mjs"
+  },
+  "keywords": [
+    "audio",
+    "wifi-audio",
+    "streaming",
+    "bluetooth-speaker",
+    "pc-to-phone",
+    "low-latency",
+    "wasapi-loopback",
+    "multiroom-audio",
+    "ffmpeg",
+    "webaudio",
+    "wireless-audio"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.1.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.21.3"
+  }
+}

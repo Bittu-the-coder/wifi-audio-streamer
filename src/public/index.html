@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>Wi-Fi Audio Stream</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- Hidden native audio element for direct, 100% reliable stream decoding -->
+  <audio id="audioPlayer" preload="none" crossorigin="anonymous"></audio>
+
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <span class="logo-symbol">●</span>
+        <span class="logo-text">WIFI AUDIO</span>
+      </div>
+      <div id="statusPill" class="status-badge offline" role="status" aria-live="polite">
+        <span class="badge-dot" aria-hidden="true"></span>
+        <span id="statusText">READY</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- Minimalist Audio Player Card -->
+      <section class="card player-card">
+        <div class="visualizer-box">
+          <canvas id="visualizer" width="500" height="120" aria-label="Audio Visualizer"></canvas>
+          
+          <button id="joinBtn" class="play-btn" type="button" aria-label="Play / Pause Audio Stream">
+            <span id="playIcon" class="btn-icon">▶</span>
+            <span id="joinLabel" class="btn-text">CONNECT</span>
+          </button>
+        </div>
+
+        <div id="streamNote" class="notice hidden" aria-live="polite"></div>
+
+        <!-- Speaker Channel Controls -->
+        <div class="control-row">
+          <span class="row-label">CHANNEL</span>
+          <div class="btn-group" id="channelGroup">
+            <button class="grp-btn active" data-channel="stereo" type="button">STEREO</button>
+            <button class="grp-btn" data-channel="left" type="button">LEFT</button>
+            <button class="grp-btn" data-channel="right" type="button">RIGHT</button>
+          </div>
+        </div>
+
+        <!-- Volume Control -->
+        <div class="control-row">
+          <div class="row-header">
+            <span class="row-label">VOLUME</span>
+            <span id="volumeVal" class="val-badge">100%</span>
+          </div>
+          <input id="volume" class="slider" type="range" min="0" max="200" step="1" value="100" aria-label="Volume">
+        </div>
+      </section>
+
+      <!-- Minimal Telemetry -->
+      <section class="telemetry">
+        <div class="stat-box">
+          <span class="stat-num" id="clientCount">0</span>
+          <span class="stat-lbl">DEVICES</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-num" id="latency">—</span>
+          <span class="stat-lbl">LATENCY</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-num" id="streamMode">LIVE</span>
+          <span class="stat-lbl">SOURCE</span>
+        </div>
+      </section>
+
+      <!-- Pair / Connection Box -->
+      <section class="card pair-card">
+        <span class="card-title">PAIR DEVICE</span>
+        <div class="url-group">
+          <input id="urlBox" class="url-input" type="text" readonly aria-label="Stream URL">
+          <button id="copyBtn" class="btn-action" type="button">COPY</button>
+        </div>
+        <div class="qr-box">
+          <img id="qrImg" src="/api/qr" alt="QR Code" width="150" height="150">
+        </div>
+        <span class="hint">Connect phones to the same Wi-Fi network</span>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span id="securityNote">SECURE LOCAL STREAM</span>
+    </footer>
+  </div>
+
+  <!-- PIN Modal -->
+  <div id="pinOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <form id="pinForm" class="modal-card" novalidate>
+      <span class="modal-title">ENTER PIN</span>
+      <p class="modal-hint">Stream is PIN protected by the host</p>
+      <input id="pinInput" class="pin-field" type="password" inputmode="numeric" placeholder="••••" required>
+      <p id="pinError" class="error-msg hidden" role="alert"></p>
+      <button class="btn-submit" type="submit">UNLOCK</button>
+    </form>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

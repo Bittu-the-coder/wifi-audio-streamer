@@ -1,0 +1,13 @@
+node_modules/
+.env
+*.log
+
+# Bundled ffmpeg binaries (downloaded by setup, ~200 MB)
+tools/
+
+# Generated test audio (recreated on demand by `pnpm gen:audio` or at startup)
+audio/*.wav
+audio/*.mp3
+
+# Keep the audio dir tracked
+!audio/.gitkeep
