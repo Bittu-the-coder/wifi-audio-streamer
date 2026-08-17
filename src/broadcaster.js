@@ -36,12 +36,19 @@ export class Broadcaster extends EventEmitter {
    */
   addClient(res, { contentType, initialChunk = null } = {}) {
     const id = crypto.randomUUID()
+
+    if (res.socket) {
+      res.socket.setNoDelay(true)
+      res.socket.setKeepAlive(true, 1000)
+    }
+
     res.writeHead(200, {
       'Content-Type': contentType,
-      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
       Pragma: 'no-cache',
       'X-Accel-Buffering': 'no',
       'Accept-Ranges': 'none',
+      Connection: 'keep-alive',
     })
     res.flushHeaders()
     if (initialChunk) res.write(initialChunk)

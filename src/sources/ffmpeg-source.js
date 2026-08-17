@@ -15,8 +15,9 @@ export class FfmpegSource extends EventEmitter {
     ffmpegPath = 'ffmpeg',
     device = 'default',
     captureFormat = 'auto', // 'auto' | 'wasapi' | 'dshow'
+    audioCodec = 'pcm', // 'pcm' | 'mp3'
     bitrate = '128k',
-    bufferMs = 20, // 20ms low latency buffer
+    bufferMs = 20,
     volume = 1,
     extraArgs = [],
   } = {}) {
@@ -24,6 +25,7 @@ export class FfmpegSource extends EventEmitter {
     this.ffmpegPath = ffmpegPath
     this.device = device
     this.captureFormat = captureFormat
+    this.audioCodec = audioCodec
     this.bitrate = bitrate
     this.bufferMs = bufferMs
     this.volume = volume
@@ -33,7 +35,7 @@ export class FfmpegSource extends EventEmitter {
     this.proc = null
     this.stderrTail = ''
     this.startedAt = 0
-    this.contentType = 'audio/mpeg'
+    this.contentType = audioCodec === 'pcm' ? 'audio/pcm' : 'audio/mpeg'
     this.format = null
   }
 
@@ -46,7 +48,7 @@ export class FfmpegSource extends EventEmitter {
     const args = [
       '-hide_banner',
       '-loglevel', 'warning',
-      '-fflags', '+nobuffer+fastseek',
+      '-fflags', '+nobuffer',
       '-flags', '+low_delay',
       '-probesize', '32',
       '-analyzeduration', '0',
@@ -62,20 +64,32 @@ export class FfmpegSource extends EventEmitter {
       args.push('-i', `audio=${this.device}`)
     }
 
-    // User-supplied escape hatch (input options, filters, device overrides…)
     if (this.extraArgs.length) args.push(...this.extraArgs)
 
-    args.push(
-      '-c:a', 'libmp3lame',
-      '-b:a', this.bitrate,
-      '-ar', '44100',
-      '-ac', '2',
-      '-flush_packets', '1',
-    )
-    if (this.volume !== 1) {
-      args.push('-af', `volume=${this.volume.toFixed(2)}`)
+    if (this.audioCodec === 'pcm') {
+      args.push(
+        '-c:a', 'pcm_s16le',
+        '-ar', '44100',
+        '-ac', '2',
+      )
+      if (this.volume !== 1) {
+        args.push('-af', `volume=${this.volume.toFixed(2)}`)
+      }
+      args.push('-f', 's16le', 'pipe:1')
+    } else {
+      args.push(
+        '-c:a', 'libmp3lame',
+        '-b:a', this.bitrate,
+        '-ar', '44100',
+        '-ac', '2',
+        '-write_xing', '0',
+        '-flush_packets', '1',
+      )
+      if (this.volume !== 1) {
+        args.push('-af', `volume=${this.volume.toFixed(2)}`)
+      }
+      args.push('-f', 'mp3', 'pipe:1')
     }
-    args.push('-f', 'mp3', 'pipe:1')
     return args
   }
 

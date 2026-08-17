@@ -1,4 +1,4 @@
-/* Wi-Fi Audio Stream Client — Rock-Solid HTML5 Stream Engine with WebAudio Processing */
+/* Wi-Fi Audio Stream Client — Real-Time WebSocket Raw PCM Audio Engine */
 'use strict'
 
 const $ = (s) => document.querySelector(s)
@@ -32,14 +32,15 @@ const els = {
 /* ------------------------------------------------------------------ */
 const state = {
   playing: false,
+  ws: null,
   audioCtx: null,
-  sourceNode: null,
   masterGain: null,
   channelSplitter: null,
   channelMerger: null,
   analyser: null,
   channelMode: 'stereo', // 'stereo' | 'left' | 'right'
   userVolume: 1,
+  nextPlayTime: 0,
   pinEnabled: false,
   authed: true,
   animFrame: null,
@@ -67,15 +68,7 @@ function initWebAudio() {
   if (state.audioCtx) return
 
   const AudioCtx = window.AudioContext || window.webkitAudioContext
-  state.audioCtx = new AudioCtx({ latencyHint: 'interactive' })
-
-  // Bridge HTML5 audio element into WebAudio graph
-  try {
-    state.sourceNode = state.audioCtx.createMediaElementSource(els.audioPlayer)
-  } catch {
-    /* Source node already created */
-    return
-  }
+  state.audioCtx = new AudioCtx({ latencyHint: 'interactive', sampleRate: 44100 })
 
   state.masterGain = state.audioCtx.createGain()
   state.masterGain.gain.value = state.userVolume
@@ -87,8 +80,7 @@ function initWebAudio() {
   state.channelSplitter = state.audioCtx.createChannelSplitter(2)
   state.channelMerger = state.audioCtx.createChannelMerger(2)
 
-  // Default wiring: Source -> Splitter -> Merger -> MasterGain -> Analyser -> Destination
-  state.sourceNode.connect(state.channelSplitter)
+  // Wiring: BufferSource -> ChannelSplitter -> ChannelMerger -> MasterGain -> Analyser -> Destination
   state.channelSplitter.connect(state.channelMerger, 0, 0)
   state.channelSplitter.connect(state.channelMerger, 1, 1)
 
@@ -111,73 +103,121 @@ function updateChannelRouting() {
   const m = state.channelMerger
 
   if (state.channelMode === 'left') {
-    // Route left input to both left and right speakers
     s.connect(m, 0, 0)
     s.connect(m, 0, 1)
   } else if (state.channelMode === 'right') {
-    // Route right input to both left and right speakers
     s.connect(m, 1, 0)
     s.connect(m, 1, 1)
   } else {
-    // Default stereo
     s.connect(m, 0, 0)
     s.connect(m, 1, 1)
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* Audio Stream Playback Controls                                     */
+/* Real-Time WebSocket Raw PCM Audio Stream Receiver                  */
 /* ------------------------------------------------------------------ */
+function connectWebSocket() {
+  if (state.ws) {
+    try { state.ws.close() } catch {}
+  }
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${location.host}/ws/audio`
+
+  setStatus('CONNECTING...', false)
+  const ws = new WebSocket(wsUrl)
+  ws.binaryType = 'arraybuffer'
+  state.ws = ws
+
+  ws.onopen = () => {
+    state.playing = true
+    setStatus('LIVE STREAM', true)
+  }
+
+  ws.onmessage = (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      schedulePcmChunk(event.data)
+    }
+  }
+
+  ws.onerror = () => {
+    startHttpFallback()
+  }
+
+  ws.onclose = () => {
+    if (state.playing) {
+      setStatus('RECONNECTING...', false)
+      setTimeout(connectWebSocket, 1500)
+    }
+  }
+}
+
+function schedulePcmChunk(arrayBuffer) {
+  if (!state.audioCtx) return
+
+  const int16 = new Int16Array(arrayBuffer)
+  if (int16.length < 2) return
+
+  const samples = Math.floor(int16.length / 2) // 2 channels (stereo)
+  const audioBuffer = state.audioCtx.createBuffer(2, samples, 44100)
+  const left = audioBuffer.getChannelData(0)
+  const right = audioBuffer.getChannelData(1)
+
+  for (let i = 0; i < samples; i++) {
+    left[i] = int16[i * 2] / 32768.0
+    right[i] = int16[i * 2 + 1] / 32768.0
+  }
+
+  const now = state.audioCtx.currentTime
+  if (state.nextPlayTime < now) {
+    state.nextPlayTime = now + 0.05 // 50ms jitter buffer
+  }
+
+  const source = state.audioCtx.createBufferSource()
+  source.buffer = audioBuffer
+  source.connect(state.channelSplitter)
+  source.start(state.nextPlayTime)
+
+  state.nextPlayTime += audioBuffer.duration
+  state.playing = true
+  setStatus('LIVE STREAM', true)
+}
+
+function startHttpFallback() {
+  if (els.audioPlayer) {
+    els.audioPlayer.src = `/stream?t=${Date.now()}`
+    els.audioPlayer.volume = Math.min(1, state.userVolume)
+    els.audioPlayer.play().then(() => {
+      state.playing = true
+      setStatus('LIVE STREAM', true)
+    }).catch(() => {
+      setStatus('READY', false)
+    })
+  }
+}
+
 async function startPlayback() {
   initWebAudio()
   if (state.audioCtx && state.audioCtx.state === 'suspended') {
     await state.audioCtx.resume()
   }
-
-  setStatus('CONNECTING...', false)
-
-  // Connect to live stream with cache-buster timestamp
-  const streamUrl = `/stream?t=${Date.now()}`
-  els.audioPlayer.src = streamUrl
-  els.audioPlayer.volume = Math.min(1, state.userVolume)
-
-  try {
-    await els.audioPlayer.play()
-    state.playing = true
-    setStatus('LIVE STREAM', true)
-  } catch (err) {
-    setStatus('READY', false)
-    els.streamNote.textContent = `Autoplay blocked or stream unreachable. Tap CONNECT to retry.`
-    els.streamNote.classList.remove('hidden')
-  }
+  state.nextPlayTime = 0
+  connectWebSocket()
 }
 
 function stopPlayback() {
   state.playing = false
-  els.audioPlayer.pause()
-  els.audioPlayer.src = ''
+  if (state.ws) {
+    try { state.ws.close() } catch {}
+    state.ws = null
+  }
+  if (els.audioPlayer) {
+    els.audioPlayer.pause()
+    els.audioPlayer.src = ''
+  }
   setStatus('READY', false)
 }
-
-/* Adaptive Live Edge Monitor — locks audio playback to sub-100ms latency */
-setInterval(() => {
-  if (!state.playing || !els.audioPlayer || els.audioPlayer.paused) return
-  const buf = els.audioPlayer.buffered
-  if (buf && buf.length > 0) {
-    const liveEnd = buf.end(buf.length - 1)
-    const lag = liveEnd - els.audioPlayer.currentTime
-    if (lag > 0.3) {
-      // Hard catchup to 50ms behind live edge
-      els.audioPlayer.currentTime = liveEnd - 0.05
-      els.audioPlayer.playbackRate = 1.0
-    } else if (lag > 0.1) {
-      // Smooth subtle catchup rate
-      els.audioPlayer.playbackRate = 1.04
-    } else {
-      els.audioPlayer.playbackRate = 1.0
-    }
-  }
-}, 400)
 
 /* ------------------------------------------------------------------ */
 /* Visualizer (Minimalist Black & White Spectrum)                      */
@@ -195,7 +235,6 @@ function startVisualizer() {
     ctx.clearRect(0, 0, width, height)
 
     if (!state.analyser || !state.playing) {
-      // Idle thin center line
       ctx.beginPath()
       ctx.moveTo(0, height / 2)
       ctx.lineTo(width, height / 2)
@@ -252,9 +291,11 @@ els.volume.addEventListener('input', () => {
   state.userVolume = val / 100
   els.volumeVal.textContent = `${val}%`
   
-  els.audioPlayer.volume = Math.min(1, state.userVolume)
   if (state.masterGain) {
     state.masterGain.gain.value = state.userVolume
+  }
+  if (els.audioPlayer) {
+    els.audioPlayer.volume = Math.min(1, state.userVolume)
   }
 })
 
@@ -269,13 +310,6 @@ els.copyBtn.addEventListener('click', async () => {
   const original = els.copyBtn.textContent
   els.copyBtn.textContent = 'COPIED'
   setTimeout(() => { els.copyBtn.textContent = original }, 1500)
-})
-
-els.audioPlayer.addEventListener('error', () => {
-  if (state.playing) {
-    setStatus('RECONNECTING...', false)
-    setTimeout(startPlayback, 2000)
-  }
 })
 
 /* ------------------------------------------------------------------ */
