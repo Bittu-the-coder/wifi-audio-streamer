@@ -53,6 +53,7 @@ const log = (...args) => console.log('[wifi-audio]', ...args)
 function bindSource(newSource) {
   source = newSource
   const info = newSource.info?.() ?? {}
+  wsServer.setFormat(info)
   const bps =
     newSource instanceof FfmpegSource
       ? bitrateToBytesPerSecond(config.audioBitrate)
@@ -109,6 +110,9 @@ function startFfmpegSource() {
     device: config.captureDevice,
     bitrate: config.audioBitrate,
     bufferMs: config.audioBufferMs,
+    sampleRate: config.sampleRate,
+    channels: config.channels,
+    frameMs: config.pcmFrameMs,
     volume: config.volume,
     extraArgs: config.ffmpegArgs,
   })

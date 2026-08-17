@@ -11,6 +11,19 @@ export class AudioWebSocketServer extends EventEmitter {
     this.clients = new Map() // id -> { ws, connectedAt, droppedBytes, isAlive }
     this.totalBytes = 0
     this.pingInterval = null
+    this.format = { supported: false }
+  }
+
+  setFormat(info = {}) {
+    const supported = (info.contentType === 'audio/pcm' || info.contentType === 'audio/wav') && info.bitsPerSample === 16
+    this.format = {
+      supported,
+      codec: supported ? 'pcm_s16le' : null,
+      sampleRate: info.sampleRate ?? 48000,
+      channels: info.channels ?? 2,
+      bitsPerSample: info.bitsPerSample ?? 16,
+      frameMs: info.frameMs ?? null,
+    }
   }
 
   attach(server) {
@@ -73,6 +86,7 @@ export class AudioWebSocketServer extends EventEmitter {
           type: 'init',
           serverTime: Date.now(),
           clientId: id,
+          audio: this.format,
         }))
       } catch {
         /* client disconnected immediately */
@@ -101,13 +115,13 @@ export class AudioWebSocketServer extends EventEmitter {
   }
 
   broadcast(chunk) {
-    if (!this.clients.size) return
+    if (!this.clients.size || !this.format.supported) return
     this.totalBytes += chunk.length
 
     for (const [id, client] of this.clients) {
       if (client.ws.readyState === WebSocket.OPEN) {
         // Backpressure check: if bufferedAmount > 256KB, drop chunk to keep latency ultra low
-        if (client.ws.bufferedAmount > 256 * 1024) {
+        if (client.ws.bufferedAmount > 64 * 1024) {
           client.droppedBytes += chunk.length
           continue
         }

@@ -18,6 +18,9 @@ export class FfmpegSource extends EventEmitter {
     audioCodec = 'pcm', // 'pcm' | 'mp3'
     bitrate = '128k',
     bufferMs = 20,
+    sampleRate = 48000,
+    channels = 2,
+    frameMs = 10,
     volume = 1,
     extraArgs = [],
   } = {}) {
@@ -28,6 +31,11 @@ export class FfmpegSource extends EventEmitter {
     this.audioCodec = audioCodec
     this.bitrate = bitrate
     this.bufferMs = bufferMs
+    this.sampleRate = sampleRate
+    this.channels = channels
+    this.frameMs = frameMs
+    this.frameBytes = Math.max(2 * channels, Math.floor(sampleRate * channels * 2 * frameMs / 1000 / (channels * 2)) * channels * 2)
+    this.remainder = Buffer.alloc(0)
     this.volume = volume
     this.extraArgs = extraArgs
     this.stopped = false
@@ -69,8 +77,8 @@ export class FfmpegSource extends EventEmitter {
     if (this.audioCodec === 'pcm') {
       args.push(
         '-c:a', 'pcm_s16le',
-        '-ar', '44100',
-        '-ac', '2',
+        '-ar', String(this.sampleRate),
+        '-ac', String(this.channels),
       )
       if (this.volume !== 1) {
         args.push('-af', `volume=${this.volume.toFixed(2)}`)
@@ -80,8 +88,8 @@ export class FfmpegSource extends EventEmitter {
       args.push(
         '-c:a', 'libmp3lame',
         '-b:a', this.bitrate,
-        '-ar', '44100',
-        '-ac', '2',
+        '-ar', String(this.sampleRate),
+        '-ac', String(this.channels),
         '-write_xing', '0',
         '-flush_packets', '1',
       )
@@ -99,6 +107,7 @@ export class FfmpegSource extends EventEmitter {
     this.startedAt = Date.now()
     this.stderrTail = ''
     this.sawData = false
+    this.remainder = Buffer.alloc(0)
 
     let proc
     try {
@@ -119,7 +128,13 @@ export class FfmpegSource extends EventEmitter {
         this.state = 'running'
         this.emit('first-data')
       }
-      this.emit('data', chunk)
+      // stdout chunk boundaries are arbitrary; emit fixed, whole PCM frames.
+      const data = this.remainder.length ? Buffer.concat([this.remainder, chunk]) : chunk
+      const usable = data.length - (data.length % this.frameBytes)
+      for (let offset = 0; offset < usable; offset += this.frameBytes) {
+        this.emit('data', data.subarray(offset, offset + this.frameBytes))
+      }
+      this.remainder = usable === data.length ? Buffer.alloc(0) : Buffer.from(data.subarray(usable))
     })
 
     const tail = (s) => {
@@ -165,6 +180,10 @@ export class FfmpegSource extends EventEmitter {
       detail: this.device,
       device: this.device,
       bitrate: this.bitrate,
+      sampleRate: this.sampleRate,
+      channels: this.channels,
+      bitsPerSample: 16,
+      frameMs: this.frameMs,
       volume: this.volume,
       ffmpegPath: this.ffmpegPath,
       contentType: this.contentType,

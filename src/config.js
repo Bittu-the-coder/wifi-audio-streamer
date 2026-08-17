@@ -86,22 +86,26 @@ export function loadConfig(env = process.env) {
     ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',
     captureDevice: env.CAPTURE_DEVICE || 'CABLE Output (VB-Audio Virtual Cable)',
     audioBitrate: env.AUDIO_BITRATE || '128k',
-    audioBufferMs: int(env.AUDIO_BUFFER_MS, 100),
+    audioBufferMs: int(env.AUDIO_BUFFER_MS, 20),
+    sampleRate: int(env.SAMPLE_RATE, 48000),
+    channels: int(env.CHANNELS, 2),
+    pcmFrameMs: int(env.PCM_FRAME_MS, 10),
     volume: float(env.VOLUME, 1),
     ffmpegArgs: env.FFMPEG_ARGS ? env.FFMPEG_ARGS.trim().split(/\s+/) : [],
     // Security
     pin: env.AUTH_PIN || '',
     authSecret: env.AUTH_SECRET || '',
     // Streaming internals
-    chunkSize: int(env.CHUNK_SIZE, 16384),
-    maxBacklog: int(env.MAX_BACKLOG, 512 * 1024), // per-client drop threshold (bytes)
+    chunkSize: int(env.CHUNK_SIZE, 3840), // 20 ms at 48 kHz stereo s16le
+    maxBacklog: int(env.MAX_BACKLOG, 64 * 1024), // slow clients stay at the live edge
     // Live-edge segmentation (phones stay in sync by playing the same segment)
     segmentMs: int(env.SEGMENT_MS, 1000),
     liveEdge: int(env.LIVE_EDGE, 1), // segments behind the live edge clients start at
     keepSegments: int(env.KEEP_SEGMENTS, 16),
     syncLeadMs: int(env.SYNC_LEAD_MS, 2500), // "Sync start": time before the epoch begins
     fallbackTimeoutMs: int(env.FALLBACK_TIMEOUT, 6000), // auto-mode: wait for first ffmpeg data
-    bufferTarget: float(env.BUFFER_TARGET, 1.2), // seconds of buffered audio before client plays
+    bufferTarget: float(env.BUFFER_TARGET, 0.10), // WebSocket jitter buffer, seconds
+    maxClientBuffer: float(env.MAX_CLIENT_BUFFER, 0.30), // drop instead of adding latency
     pace: float(env.PACE, 1.04), // static loop runs slightly faster than real-time
   }
 }

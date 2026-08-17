@@ -44,6 +44,13 @@ const state = {
   pinEnabled: false,
   authed: true,
   animFrame: null,
+  audioFormat: { sampleRate: 48000, channels: 2 },
+  streamStarted: false,
+  pendingChunks: [],
+  pendingDuration: 0,
+  targetBuffer: 0.10,
+  maxClientBuffer: 0.30,
+  transport: 'ws',
 }
 
 function setStatus(statusText, isOnline = false) {
@@ -68,7 +75,7 @@ function initWebAudio() {
   if (state.audioCtx) return
 
   const AudioCtx = window.AudioContext || window.webkitAudioContext
-  state.audioCtx = new AudioCtx({ latencyHint: 'interactive', sampleRate: 44100 })
+  state.audioCtx = new AudioCtx({ latencyHint: 'interactive', sampleRate: state.audioFormat.sampleRate })
 
   state.masterGain = state.audioCtx.createGain()
   state.masterGain.gain.value = state.userVolume
@@ -136,13 +143,30 @@ function connectWebSocket() {
   }
 
   ws.onmessage = (event) => {
-    if (event.data instanceof ArrayBuffer) {
-      schedulePcmChunk(event.data)
+    if (typeof event.data === 'string') {
+      try {
+        const message = JSON.parse(event.data)
+        if (message.type === 'init') {
+          if (!message.audio?.supported || message.audio.codec !== 'pcm_s16le') {
+            state.transport = 'http'
+            ws.close()
+            startHttpFallback()
+            return
+          }
+          state.audioFormat = message.audio
+          initWebAudio()
+        }
+      } catch { /* ignore malformed control packet */ }
+      return
     }
+    if (event.data instanceof ArrayBuffer) schedulePcmChunk(event.data)
   }
 
   ws.onerror = () => {
-    startHttpFallback()
+    if (state.transport === 'ws') {
+      state.transport = 'http'
+      startHttpFallback()
+    }
   }
 
   ws.onclose = () => {
@@ -156,34 +180,46 @@ function connectWebSocket() {
 function schedulePcmChunk(arrayBuffer) {
   if (!state.audioCtx) return
 
+  const { channels, sampleRate } = state.audioFormat
   const int16 = new Int16Array(arrayBuffer)
-  if (int16.length < 2) return
+  const frames = Math.floor(int16.length / channels)
+  if (!frames) return
+  const duration = frames / sampleRate
 
-  const samples = Math.floor(int16.length / 2) // 2 channels (stereo)
-  const audioBuffer = state.audioCtx.createBuffer(2, samples, 44100)
-  const left = audioBuffer.getChannelData(0)
-  const right = audioBuffer.getChannelData(1)
-
-  for (let i = 0; i < samples; i++) {
-    left[i] = int16[i * 2] / 32768.0
-    right[i] = int16[i * 2 + 1] / 32768.0
+  // Do not begin with a single packet: a short, fixed cushion absorbs normal
+  // Wi-Fi jitter without turning a slow phone into a delayed speaker.
+  if (!state.streamStarted) {
+    state.pendingChunks.push(arrayBuffer)
+    state.pendingDuration += duration
+    if (state.pendingDuration < state.targetBuffer) return
+    const pending = state.pendingChunks
+    state.pendingChunks = []
+    state.pendingDuration = 0
+    state.streamStarted = true
+    state.nextPlayTime = state.audioCtx.currentTime + 0.02
+    for (const chunk of pending) schedulePcmChunk(chunk)
+    return
   }
 
   const now = state.audioCtx.currentTime
-  if (state.nextPlayTime < now) {
-    state.nextPlayTime = now + 0.05 // 50ms jitter buffer
+  if (state.nextPlayTime < now) state.nextPlayTime = now + 0.02
+  // A constrained client must skip ahead, never grow an audible delay.
+  if (state.nextPlayTime - now > state.maxClientBuffer) return
+
+  const audioBuffer = state.audioCtx.createBuffer(channels, frames, sampleRate)
+  for (let channel = 0; channel < channels; channel++) {
+    const output = audioBuffer.getChannelData(channel)
+    for (let i = 0; i < frames; i++) output[i] = int16[i * channels + channel] / 32768
   }
 
   const source = state.audioCtx.createBufferSource()
   source.buffer = audioBuffer
   source.connect(state.channelSplitter)
   source.start(state.nextPlayTime)
-
-  state.nextPlayTime += audioBuffer.duration
+  state.nextPlayTime += duration
   state.playing = true
   setStatus('LIVE STREAM', true)
 }
-
 function startHttpFallback() {
   if (els.audioPlayer) {
     els.audioPlayer.src = `/stream?t=${Date.now()}`
@@ -323,6 +359,8 @@ async function refreshStatus() {
     els.urlBox.value = s.url
     els.clientCount.textContent = String(s.clients)
     els.streamMode.textContent = s.mode === 'static' ? 'TEST' : 'LIVE'
+    state.targetBuffer = Math.max(0.04, Number(s.bufferTarget) || 0.10)
+    state.maxClientBuffer = Math.max(state.targetBuffer + 0.05, Number(s.maxClientBuffer) || 0.30)
 
     els.securityNote.textContent = s.pinEnabled
       ? 'PIN PROTECTED STREAM'

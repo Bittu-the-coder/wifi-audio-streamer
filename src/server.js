@@ -104,6 +104,7 @@ export function createApp({ config, source, broadcaster, auth, primaryUrl, onVol
       pinEnabled: auth.enabled,
       authed: auth.enabled ? auth.verify(parseCookies(req.headers.cookie || '')[COOKIE_NAME]) : true,
       bufferTarget: config.bufferTarget,
+      maxClientBuffer: config.maxClientBuffer,
       note: config.note ?? null,
       epoch: sync.epoch,
       epochStartAt: sync.epochStartAt,
