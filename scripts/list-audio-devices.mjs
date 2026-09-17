@@ -9,6 +9,10 @@ import { spawnSync } from 'node:child_process'
 import { parseDshowDevices } from './doctor.mjs'
 
 const ffmpeg = process.argv[2] || 'ffmpeg'
+if (!/^[\w./\\:-]+$/.test(ffmpeg)) {
+  console.error(`Invalid ffmpeg path "${ffmpeg}" — only letters, numbers, ./\\:-_ are allowed.`)
+  process.exit(1)
+}
 console.log(`Listing audio devices via "${ffmpeg}" …\n`)
 
 const r = spawnSync(ffmpeg, ['-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'], {
