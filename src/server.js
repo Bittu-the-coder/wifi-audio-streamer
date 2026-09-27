@@ -198,7 +198,7 @@ export function createApp({
     res.json({ ok: true });
   });
 
-  app.post('/api/volume', (req, res) => {
+  app.post('/api/volume', requireAuth, (req, res) => {
     if (config.mode !== 'ffmpeg' || !activeSource()) {
       return res.status(400).json({
         error: 'Server-side volume is only available in live capture mode',
