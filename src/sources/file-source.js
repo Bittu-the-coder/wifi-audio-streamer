@@ -47,13 +47,21 @@ export function parseMp3Frames(buf) {
       const valid =
         version !== 1 && // version 1 is reserved
         layer !== 0 && // layer 0 is reserved
-        brIdx !== 0 && brIdx !== 15 && // free/reserved bitrates
+        brIdx !== 0 &&
+        brIdx !== 15 && // free/reserved bitrates
         srIdx !== 3 // sample rate 3 is reserved
 
       if (valid) {
         const bitrate =
-          (layer === 1 ? (version === MPEG1 ? BITRATE_V1_L3 : BITRATE_V2_L3) : version === MPEG1 ? BITRATE_V1_L2 : BITRATE_V2_L2)[brIdx] * 1000
-        const sampleRates = version === MPEG1 ? SAMPLE_RATE_V1 : version === MPEG2 ? SAMPLE_RATE_V2 : SAMPLE_RATE_V25
+          (layer === 1
+            ? version === MPEG1
+              ? BITRATE_V1_L3
+              : BITRATE_V2_L3
+            : version === MPEG1
+              ? BITRATE_V1_L2
+              : BITRATE_V2_L2)[brIdx] * 1000
+        const sampleRates =
+          version === MPEG1 ? SAMPLE_RATE_V1 : version === MPEG2 ? SAMPLE_RATE_V2 : SAMPLE_RATE_V25
         const sr = sampleRates[srIdx]
         const samples = layer === 3 ? 384 : version === MPEG1 ? 1152 : 576
         const frameLen =
@@ -82,6 +90,7 @@ export class FileSource extends EventEmitter {
     this.stopped = false
     this.state = 'idle'
     this.headerChunk = null // WAV RIFF header (emitted once per connection)
+    this.wavFormat = null
     this.chunks = [] // loop payload, split into whole-frame chunks
     this.bytesPerSecond = 0
     this.duration = 0
@@ -138,6 +147,11 @@ export class FileSource extends EventEmitter {
     this.duration = usable / fmt.byteRate
     this.contentType = 'audio/wav'
     this.format = `${fmt.sampleRate} Hz, ${fmt.channels}ch, ${fmt.bits}-bit PCM`
+    this.wavFormat = {
+      sampleRate: fmt.sampleRate,
+      channels: fmt.channels,
+      bits: fmt.bits
+    }
   }
 
   _initMp3(buf) {
@@ -167,7 +181,8 @@ export class FileSource extends EventEmitter {
     this.bytesPerSecond = totalBytes / totalDuration
     this.duration = totalDuration
     this.contentType = 'audio/mpeg'
-    this.format = `MPEG-1/2 Layer II/III, ${this.duration.toFixed(1)}s, ~${Math.round(this.bytesPerSecond * 8 / 1000)} kbps`
+    this.format = `MPEG-1/2 Layer II/III, ${this.duration.toFixed(1)}s, ~${Math.round((this.bytesPerSecond * 8) / 1000)} kbps`
+    this.wavFormat = null
   }
 
   /**
@@ -246,7 +261,7 @@ export class FileSource extends EventEmitter {
       format: this.format,
       loopSeconds: Number(this.duration.toFixed(2)),
       contentType: this.contentType,
-      state: this.state,
+      state: this.state
     }
   }
 }

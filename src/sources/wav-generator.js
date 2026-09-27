@@ -15,28 +15,28 @@ function defaultNotes() {
   const bar = 2.0 // seconds per bar (120 BPM, 2 beats per bar)
   return [
     // Bar 1
-    [0.00, 220.0, 0.28, 0.16], // A3
-    [0.25, 261.63, 0.20, 0.14], // C4
-    [0.50, 329.63, 0.30, 0.16], // E4
+    [0.0, 220.0, 0.28, 0.16], // A3
+    [0.25, 261.63, 0.2, 0.14], // C4
+    [0.5, 329.63, 0.3, 0.16], // E4
     [0.75, 392.0, 0.16, 0.12], // G4
-    [1.00, 440.0, 0.24, 0.15], // A4
+    [1.0, 440.0, 0.24, 0.15], // A4
     [1.25, 392.0, 0.14, 0.11], // G4
-    [1.50, 329.63, 0.34, 0.16], // E4
+    [1.5, 329.63, 0.34, 0.16], // E4
     // Bar 2 (a step lower)
-    [bar + 0.00, 174.61, 0.28, 0.16], // F3
-    [bar + 0.25, 220.0, 0.20, 0.14], // A3
-    [bar + 0.50, 261.63, 0.30, 0.16], // C4
+    [bar + 0.0, 174.61, 0.28, 0.16], // F3
+    [bar + 0.25, 220.0, 0.2, 0.14], // A3
+    [bar + 0.5, 261.63, 0.3, 0.16], // C4
     [bar + 0.75, 293.66, 0.18, 0.13], // D4
-    [bar + 1.00, 329.63, 0.32, 0.16], // E4
-    [bar + 1.25, 261.63, 0.20, 0.13], // C4
-    [bar + 1.50, 220.0, 0.40, 0.17], // A3 (ends 0.1s before the loop point)
+    [bar + 1.0, 329.63, 0.32, 0.16], // E4
+    [bar + 1.25, 261.63, 0.2, 0.13], // C4
+    [bar + 1.5, 220.0, 0.4, 0.17] // A3 (ends 0.1s before the loop point)
   ]
 }
 
 function defaultKicks() {
   return [
-    [0.0, 0.22, 0.30],
-    [2.0, 0.22, 0.30],
+    [0.0, 0.22, 0.3],
+    [2.0, 0.22, 0.3]
   ]
 }
 
@@ -48,7 +48,7 @@ export function generateTestWav({
   sampleRate = DEFAULT_SAMPLE_RATE,
   channels = DEFAULT_CHANNELS,
   notes = null,
-  kicks = null,
+  kicks = null
 } = {}) {
   const totalSamples = Math.round(seconds * sampleRate)
   notes ??= defaultNotes()
@@ -65,7 +65,7 @@ export function generateTestWav({
     for (let s = s0; s < s1; s++) {
       const t = (s - s0) / sampleRate
       let env = Math.min(1, t / attack)
-      if (s >= relFrom) env *= Math.max(0, 1 - (s - relFrom) / ((s1 - relFrom) || 1))
+      if (s >= relFrom) env *= Math.max(0, 1 - (s - relFrom) / (s1 - relFrom || 1))
       const phase = 2 * Math.PI * freq * (s / sampleRate)
       // fundamental + a hint of 2nd harmonic for warmth
       const v = Math.sin(phase) + 0.35 * Math.sin(2 * phase)
@@ -107,12 +107,22 @@ export function generateTestWav({
  * Wrap raw 16-bit PCM into a standard RIFF/WAVE file Buffer.
  */
 export function buildWavBuffer({ pcm, sampleRate, channels, bits = 16 }) {
+  const header = buildWavHeader({
+    sampleRate,
+    channels,
+    bits,
+    dataSize: pcm.length
+  })
+  return Buffer.concat([header, pcm])
+}
+
+export function buildWavHeader({ sampleRate, channels, bits = 16, dataSize = 0 }) {
   const byteRate = (sampleRate * channels * bits) / 8
   const blockAlign = (channels * bits) / 8
   const header = Buffer.alloc(44)
 
   header.write('RIFF', 0, 'ascii')
-  header.writeUInt32LE(36 + pcm.length, 4)
+  header.writeUInt32LE(Math.min(0xffffffff, 36 + dataSize), 4)
   header.write('WAVE', 8, 'ascii')
   header.write('fmt ', 12, 'ascii')
   header.writeUInt32LE(16, 16) // fmt chunk size
@@ -123,9 +133,9 @@ export function buildWavBuffer({ pcm, sampleRate, channels, bits = 16 }) {
   header.writeUInt16LE(blockAlign, 32)
   header.writeUInt16LE(bits, 34)
   header.write('data', 36, 'ascii')
-  header.writeUInt32LE(pcm.length, 40)
+  header.writeUInt32LE(dataSize, 40)
 
-  return Buffer.concat([header, pcm])
+  return header
 }
 
 /**
@@ -150,7 +160,7 @@ export function parseWav(buf) {
         sampleRate: buf.readUInt32LE(off + 12),
         byteRate: buf.readUInt32LE(off + 16),
         blockAlign: buf.readUInt16LE(off + 20),
-        bits: buf.readUInt16LE(off + 22),
+        bits: buf.readUInt16LE(off + 22)
       }
     } else if (id === 'data') {
       dataOffset = off + 8

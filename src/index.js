@@ -1,23 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadDotEnv, loadConfig, getLanAddresses, pickLanAddress, AUDIO_DIR, formatBytes } from './config.js'
-import { Broadcaster } from './broadcaster.js'
-import { FileSource } from './sources/file-source.js'
-import { FfmpegSource, ffmpegAvailable } from './sources/ffmpeg-source.js'
-import { generateTestWav } from './sources/wav-generator.js'
-import { Segmenter } from './segmenter.js'
 import { createAuth } from './auth.js'
+import { Broadcaster } from './broadcaster.js'
+import { AUDIO_DIR, formatBytes, getLanAddresses, loadConfig, loadDotEnv, pickLanAddress } from './config.js'
+import { Segmenter } from './segmenter.js'
 import { createApp } from './server.js'
+import { FfmpegSource, ffmpegAvailable } from './sources/ffmpeg-source.js'
+import { FileSource } from './sources/file-source.js'
+import { generateTestWav } from './sources/wav-generator.js'
 import { AudioWebSocketServer } from './websocket-server.js'
 
 const isIp = (s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s)
-
-/** Parse ffmpeg bitrate strings like "128k" into bytes/second. */
-function bitrateToBytesPerSecond(bitrate) {
-  const m = String(bitrate).match(/^(\d+(?:\.\d+)?)\s*k?$/i)
-  if (!m) return 16000
-  return Math.round((Number(m[1]) * (m[0].toLowerCase().includes('k') ? 1000 : 1)) / 8)
-}
 
 loadDotEnv()
 const config = loadConfig()
@@ -33,7 +26,10 @@ const primaryUrl = `http://${primaryIp}:${config.port}`
 
 const auth = createAuth({ pin: config.pin, secret: config.authSecret })
 const wsServer = new AudioWebSocketServer({ auth })
-const broadcaster = new Broadcaster({ maxBacklog: config.maxBacklog, wsServer })
+const broadcaster = new Broadcaster({
+  maxBacklog: config.maxBacklog,
+  wsServer
+})
 
 let source = null
 let segmenter = null
@@ -53,16 +49,15 @@ const log = (...args) => console.log('[wifi-audio]', ...args)
 function bindSource(newSource) {
   source = newSource
   const info = newSource.info?.() ?? {}
-  const bps =
-    newSource instanceof FfmpegSource
-      ? bitrateToBytesPerSecond(config.audioBitrate)
-      : newSource.bytesPerSecond || 16000
+  const bps = newSource.bytesPerSecond || 16000
   segmenter = new Segmenter({
     segmentMs: config.segmentMs,
     keep: config.keepSegments,
     bytesPerSecond: bps,
     header: newSource.headerChunk ?? null,
-    contentType: info.contentType ?? 'audio/mpeg',
+    wavFormat: newSource.wavFormat ?? null,
+    playoutDelayMs: config.playoutDelayMs,
+    contentType: info.contentType ?? 'audio/mpeg'
   })
   newSource.on('data', (c) => {
     broadcaster.push(c)
@@ -77,7 +72,9 @@ function bindSource(newSource) {
 async function ensureTestAudioFile() {
   if (config.audioFile) {
     if (!fs.existsSync(config.audioFile)) {
-      throw new Error(`AUDIO_FILE "${config.audioFile}" does not exist. Drop a .mp3/.wav there or remove AUDIO_FILE to use the generated test tone.`)
+      throw new Error(
+        `AUDIO_FILE "${config.audioFile}" does not exist. Drop a .mp3/.wav there or remove AUDIO_FILE to use the generated test tone.`
+      )
     }
     return config.audioFile
   }
@@ -93,7 +90,11 @@ async function ensureTestAudioFile() {
 
 async function startStaticSource() {
   const file = await ensureTestAudioFile()
-  const s = new FileSource({ file, chunkSize: config.chunkSize, pace: config.pace })
+  const s = new FileSource({
+    file,
+    chunkSize: config.chunkSize,
+    pace: config.pace
+  })
   await s.start()
   bindSource(s)
   log(`static mode — looping ${path.basename(file)} (${s.duration.toFixed(1)}s loop)`)
@@ -107,10 +108,11 @@ function startFfmpegSource() {
   const s = new FfmpegSource({
     ffmpegPath: config.ffmpegPath,
     device: config.captureDevice,
-    bitrate: config.audioBitrate,
+    captureFormat: config.captureFormat,
     bufferMs: config.audioBufferMs,
+    noiseReduction: config.noiseReduction,
     volume: config.volume,
-    extraArgs: config.ffmpegArgs,
+    extraArgs: config.ffmpegArgs
   })
   s.on('error', ({ message, stderr }) => {
     log(`⚠ ffmpeg failed to start: ${message}`)
@@ -151,6 +153,7 @@ function handleFfmpegFailure(reason) {
           ? 'ffmpeg exited without producing audio (check the device name and that VB-Cable is installed)'
           : 'ffmpeg could not be started (is it installed and on PATH?)'
     config.note = `Live capture unavailable — ${why}. Playing the test tone instead.`
+    config.mode = 'static'
     log(`⚠ live capture unavailable (${reason}) — falling back to static test audio`)
     if (source instanceof FfmpegSource) source.stop()
     startStaticSource().catch((err) => {
@@ -184,7 +187,9 @@ async function init() {
       mode = 'ffmpeg'
     } else {
       mode = 'static'
-      log('ffmpeg not found — using static test audio. Install ffmpeg + VB-Cable for live capture (see README).')
+      log(
+        'ffmpeg not found — using static test audio. Install FFmpeg and configure system-audio capture (see README).'
+      )
     }
   }
   config.mode = mode
@@ -204,7 +209,17 @@ async function init() {
     if (source instanceof FfmpegSource) source.setVolume(v)
   }
 
-  const app = createApp({ config, source, broadcaster, auth, primaryUrl, onVolumeChange, segmenter })
+  const app = createApp({
+    config,
+    source,
+    broadcaster,
+    auth,
+    primaryUrl,
+    onVolumeChange,
+    segmenter,
+    getSource: () => source,
+    getSegmenter: () => segmenter
+  })
   const server = app.listen(config.port, config.host, () => {
     printBanner(server)
   })
@@ -247,13 +262,16 @@ async function printBanner(server) {
     `     Stream:   ${info.contentType ?? 'n/a'} · ${info.format ?? ''}`,
     `     Clients:  0 connected`,
     `     Security: ${auth.enabled ? 'PIN-protected 🔒' : 'NO PIN — only run on a trusted WiFi network!'}`,
-    '',
+    ''
   ]
   console.log(lines.join('\n'))
 
   try {
     const { default: QRCode } = await import('qrcode')
-    const qr = await QRCode.toString(primaryUrl, { type: 'terminal', small: true })
+    const qr = await QRCode.toString(primaryUrl, {
+      type: 'terminal',
+      small: true
+    })
     console.log(`  Scan this QR from a phone on the same WiFi to join:\n\n${qr}\n`)
   } catch {
     /* qrcode not available — URL is printed above */

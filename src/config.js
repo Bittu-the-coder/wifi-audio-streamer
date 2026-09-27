@@ -1,6 +1,6 @@
 import fs from 'node:fs'
-import path from 'node:path'
 import os from 'node:os'
+import path from 'node:path'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 export const PUBLIC_DIR = path.join(ROOT, 'src', 'public')
@@ -58,7 +58,7 @@ export function getLanAddresses() {
 export function pickLanAddress(addresses = getLanAddresses()) {
   const isPrivate = (a) => {
     const [x, y] = a.split('.').map(Number)
-    return x === 10 || x === 172 && y >= 16 && y <= 31 || x === 192 && y === 168
+    return x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
   }
   return addresses.find(isPrivate) ?? addresses[0] ?? '127.0.0.1'
 }
@@ -84,9 +84,10 @@ export function loadConfig(env = process.env) {
     testAudioSeconds: int(env.TEST_AUDIO_SECONDS, 4),
     // ffmpeg capture mode
     ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',
-    captureDevice: env.CAPTURE_DEVICE || 'CABLE Output (VB-Audio Virtual Cable)',
-    audioBitrate: env.AUDIO_BITRATE || '128k',
-    audioBufferMs: int(env.AUDIO_BUFFER_MS, 100),
+    captureFormat: (env.CAPTURE_FORMAT || 'auto').toLowerCase(),
+    captureDevice: env.CAPTURE_DEVICE || 'default',
+    audioBufferMs: int(env.AUDIO_BUFFER_MS, 40),
+    noiseReduction: Math.max(0, Math.min(30, int(env.NOISE_REDUCTION, 18))),
     volume: float(env.VOLUME, 1),
     ffmpegArgs: env.FFMPEG_ARGS ? env.FFMPEG_ARGS.trim().split(/\s+/) : [],
     // Security
@@ -96,13 +97,14 @@ export function loadConfig(env = process.env) {
     chunkSize: int(env.CHUNK_SIZE, 16384),
     maxBacklog: int(env.MAX_BACKLOG, 512 * 1024), // per-client drop threshold (bytes)
     // Live-edge segmentation (phones stay in sync by playing the same segment)
-    segmentMs: int(env.SEGMENT_MS, 1000),
+    segmentMs: int(env.SEGMENT_MS, 100),
     liveEdge: int(env.LIVE_EDGE, 1), // segments behind the live edge clients start at
     keepSegments: int(env.KEEP_SEGMENTS, 16),
     syncLeadMs: int(env.SYNC_LEAD_MS, 2500), // "Sync start": time before the epoch begins
+    playoutDelayMs: int(env.PLAYOUT_DELAY_MS, 400),
     fallbackTimeoutMs: int(env.FALLBACK_TIMEOUT, 6000), // auto-mode: wait for first ffmpeg data
     bufferTarget: float(env.BUFFER_TARGET, 1.2), // seconds of buffered audio before client plays
-    pace: float(env.PACE, 1.04), // static loop runs slightly faster than real-time
+    pace: float(env.PACE, 1.04) // static loop runs slightly faster than real-time
   }
 }
 

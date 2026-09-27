@@ -6,7 +6,8 @@
  */
 import { spawnSync } from 'node:child_process'
 import net from 'node:net'
-import { loadDotEnv, loadConfig } from '../src/config.js'
+import { loadConfig, loadDotEnv } from '../src/config.js'
+import { parseDshowDevices } from './ffmpeg-devices.js'
 
 const results = []
 const check = (ok, label, hint = '') => {
@@ -29,52 +30,100 @@ try {
 const nodeMajor = Number(process.versions.node.split('.')[0])
 check(nodeMajor >= 20, `Node.js ${process.versions.node} (need ≥ 20)`)
 
-// 2. ffmpeg --------------------------------------------------------------
-let ffmpegOk = false
-if (config.ffmpegPath !== 'ffmpeg') {
-  const r = spawnSync(config.ffmpegPath, ['-version'], { windowsHide: true, timeout: 8000, encoding: 'utf8' })
-  ffmpegOk = r.status === 0
-  check(ffmpegOk, `ffmpeg at FFMPEG_PATH "${config.ffmpegPath}"`, `File not found or not runnable. Set FFMPEG_PATH to the full ffmpeg.exe path.`)
-} else {
-  const r = spawnSync('ffmpeg', ['-version'], { windowsHide: true, timeout: 8000, encoding: 'utf8' })
-  ffmpegOk = r.status === 0 && (r.stdout || '').length > 0
-  check(ffmpegOk, 'ffmpeg installed and on PATH', 'Install it:  winget install Gyan.FFmpeg   (then open a NEW terminal)')
-}
+// 2. FFmpeg --------------------------------------------------------------
+const ffmpegResult = spawnSync(config.ffmpegPath, ['-version'], {
+  windowsHide: true,
+  timeout: 8000,
+  encoding: 'utf8'
+})
+const ffmpegOk = ffmpegResult.status === 0
+const ffmpegHint =
+  process.platform === 'win32'
+    ? 'Install FFmpeg with: winget install Gyan.FFmpeg'
+    : 'Install FFmpeg with: sudo apt install ffmpeg'
+check(ffmpegOk, `FFmpeg ${ffmpegOk ? 'available' : 'not available'} (${config.ffmpegPath})`, ffmpegHint)
 
-// 3. Capture devices (via ffmpeg dshow listing) --------------------------
-let captureDevices = []
-if (ffmpegOk) {
-  const r = spawnSync(config.ffmpegPath, ['-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'], {
-    windowsHide: true, timeout: 15000, encoding: 'utf8',
+// 3. Platform audio capture ----------------------------------------------
+if (!ffmpegOk) {
+  check(false, 'audio capture checks skipped because FFmpeg is unavailable')
+} else if (process.platform === 'win32') {
+  const usesDshow =
+    config.captureFormat === 'dshow' ||
+    (config.captureFormat === 'auto' &&
+      config.captureDevice !== 'default' &&
+      !config.captureDevice.toLowerCase().startsWith('wasapi'))
+  if (!usesDshow) {
+    check(true, 'WASAPI loopback will capture the default Windows output device')
+  } else {
+    const result = spawnSync(
+      config.ffmpegPath,
+      ['-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'],
+      {
+        windowsHide: true,
+        timeout: 15000,
+        encoding: 'utf8'
+      }
+    )
+    const devices = parseDshowDevices(`${result.stdout ?? ''}\n${result.stderr ?? ''}`)
+    const found = devices.includes(config.captureDevice)
+    check(
+      found,
+      `DirectShow device "${config.captureDevice}" ${found ? 'found' : 'not found'}`,
+      `FFmpeg sees: ${devices.join(', ') || '(no audio devices)'}`
+    )
+  }
+} else if (process.platform === 'linux') {
+  const devices = spawnSync(config.ffmpegPath, ['-hide_banner', '-devices'], {
+    encoding: 'utf8',
+    timeout: 8000
   })
-  const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
-  captureDevices = parseDshowDevices(out)
+  const hasPulseInput = /\bpulse\b/i.test(`${devices.stdout ?? ''}\n${devices.stderr ?? ''}`)
+  check(
+    hasPulseInput,
+    `FFmpeg PulseAudio input ${hasPulseInput ? 'available' : 'unavailable'}`,
+    'Install an FFmpeg build with PulseAudio support.'
+  )
 
-  const found = captureDevices.some((d) => d === config.captureDevice)
-  check(found, `capture device "${config.captureDevice}" found`, `ffmpeg sees: ${captureDevices.join(', ') || '(no audio devices)'}. Pick one and set CAPTURE_DEVICE in .env, or install VB-Audio Virtual Cable.`)
+  const defaultSink = spawnSync('pactl', ['get-default-sink'], {
+    encoding: 'utf8',
+    timeout: 5000
+  })
+  const sources = spawnSync('pactl', ['list', 'short', 'sources'], {
+    encoding: 'utf8',
+    timeout: 5000
+  })
+  const sink = defaultSink.status === 0 ? defaultSink.stdout.trim() : ''
+  const monitor = sink.endsWith('.monitor') ? sink : `${sink}.monitor`
+  const monitorFound =
+    Boolean(sink) &&
+    sources.status === 0 &&
+    sources.stdout.split(/\r?\n/).some((line) => line.includes(monitor))
+  check(
+    monitorFound,
+    `default output monitor ${monitorFound ? 'available' : 'not found'}`,
+    'Install pulseaudio-utils and ensure PipeWire/PulseAudio is running: sudo apt install pulseaudio-utils'
+  )
 } else {
-  check(false, `capture device "${config.captureDevice}" (skipped — ffmpeg missing)`)
-}
-
-// 4. VB-Cable endpoints (via PowerShell) ----------------------------------
-try {
-  const r = spawnSync('powershell', [
-    '-NoProfile', '-Command',
-    'Get-PnpDevice -Class AudioEndpoint -Status OK | Select-Object -ExpandProperty FriendlyName',
-  ], { windowsHide: true, timeout: 15000, encoding: 'utf8' })
-  const endpoints = (r.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
-  const hasCable = endpoints.some((e) => /cable/i.test(e))
-  check(hasCable, 'VB-Audio Virtual Cable installed', 'Download & install from https://vb-audio.com/Cable/ (free), then reboot or replug.')
-  if (endpoints.length) console.log(`      Devices: ${endpoints.join(' | ')}`)
-} catch {
-  check(false, 'could not query Windows audio devices')
+  check(false, `automatic system-audio capture is unsupported on ${process.platform}`)
 }
 
 // 5. Port ----------------------------------------------------------------
 await new Promise((resolve) => {
   const srv = net.createServer()
-  srv.once('error', () => { check(false, `port ${config.port} is free`, 'Another program is using it — set PORT in .env, or stop that program.'); resolve() })
-  srv.once('listening', () => { srv.close(() => { check(true, `port ${config.port} is free`); resolve() }) })
+  srv.once('error', () => {
+    check(
+      false,
+      `port ${config.port} is free`,
+      'Another program is using it — set PORT in .env, or stop that program.'
+    )
+    resolve()
+  })
+  srv.once('listening', () => {
+    srv.close(() => {
+      check(true, `port ${config.port} is free`)
+      resolve()
+    })
+  })
   srv.listen(config.port, '127.0.0.1')
 })
 
@@ -82,23 +131,6 @@ await new Promise((resolve) => {
 console.log('')
 const failed = results.filter((r) => !r.ok)
 
-/**
- * Parse dshow device names from ffmpeg's -list_devices output.
- * Handles both the modern format ("Name" (audio)) and legacy (audio="Name").
- */
-export function parseDshowDevices(out) {
-  const devices = []
-  const re = /"([^"]+)"\s+\((audio|video)\)/g
-  let m
-  while ((m = re.exec(out))) {
-    if (m[2] === 'audio') devices.push(m[1])
-  }
-  if (!devices.length) {
-    const legacy = /audio="([^"]+)"/g
-    while ((m = legacy.exec(out))) devices.push(m[1])
-  }
-  return devices
-}
 if (failed.length === 0) {
   console.log('  ✅ Everything looks ready — run:  pnpm start')
   console.log(`     Phones open:  http://<this-laptop-ip>:${config.port}`)

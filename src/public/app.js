@@ -15,6 +15,7 @@ const els = {
   streamNote: $('#streamNote'),
   urlBox: $('#urlBox'),
   copyBtn: $('#copyBtn'),
+  syncBtn: $('#syncBtn'),
   clientCount: $('#clientCount'),
   latency: $('#latency'),
   streamMode: $('#streamMode'),
@@ -24,7 +25,7 @@ const els = {
   pinInput: $('#pinInput'),
   pinError: $('#pinError'),
   channelGroup: $('#channelGroup'),
-  securityNote: $('#securityNote'),
+  securityNote: $('#securityNote')
 }
 
 /* ------------------------------------------------------------------ */
@@ -43,6 +44,18 @@ const state = {
   pinEnabled: false,
   authed: true,
   animFrame: null,
+  playbackMode: null,
+  scheduledSources: new Set(),
+  scheduledSegments: new Set(),
+  segmentEpoch: null,
+  epochStartAt: 0,
+  serverOffsetMs: 0,
+  segmentPoll: null,
+  clockSync: null,
+  pollingSegments: false,
+  scheduledPlaybackAvailable: false,
+  clientId:
+    globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 function setStatus(statusText, isOnline = false) {
@@ -105,7 +118,9 @@ function updateChannelRouting() {
 
   try {
     state.channelSplitter.disconnect()
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const s = state.channelSplitter
   const m = state.channelMerger
@@ -136,10 +151,29 @@ async function startPlayback() {
 
   setStatus('CONNECTING...', false)
 
-  // Connect to live stream with cache-buster timestamp
+  try {
+    const response = await fetch('/api/segments', { cache: 'no-store' })
+    const manifest = response.ok ? await response.json() : null
+    if (manifest?.scheduledPlayback && state.audioCtx) {
+      state.playbackMode = 'scheduled'
+      state.playing = true
+      state.segmentEpoch = null
+      state.scheduledSegments.clear()
+      await syncServerClock()
+      await scheduleAvailableSegments()
+      state.segmentPoll = setInterval(scheduleAvailableSegments, Math.max(75, manifest.segmentMs))
+      state.clockSync = setInterval(syncServerClock, 10000)
+      setStatus('LIVE SYNC', true)
+      return
+    }
+  } catch {
+    // MP3 streams use the native audio element below.
+  }
+
+  state.playbackMode = 'stream'
   const streamUrl = `/stream?t=${Date.now()}`
   els.audioPlayer.src = streamUrl
-  els.audioPlayer.volume = Math.min(1, state.userVolume)
+  els.audioPlayer.volume = 1
 
   try {
     await els.audioPlayer.play()
@@ -154,9 +188,101 @@ async function startPlayback() {
 
 function stopPlayback() {
   state.playing = false
+  state.playbackMode = null
+  clearInterval(state.segmentPoll)
+  clearInterval(state.clockSync)
+  state.segmentPoll = null
+  state.clockSync = null
+  stopScheduledSources()
+  state.scheduledSegments.clear()
   els.audioPlayer.pause()
   els.audioPlayer.src = ''
   setStatus('READY', false)
+}
+
+function stopScheduledSources() {
+  for (const source of state.scheduledSources) {
+    try {
+      source.stop()
+    } catch {}
+  }
+  state.scheduledSources.clear()
+}
+
+async function syncServerClock() {
+  const localStart = Date.now()
+  try {
+    const response = await fetch('/api/time', { cache: 'no-store' })
+    if (!response.ok) return
+    const { t } = await response.json()
+    const localEnd = Date.now()
+    state.serverOffsetMs = t - (localStart + localEnd) / 2
+  } catch {}
+}
+
+async function scheduleAvailableSegments() {
+  if (!state.playing || state.playbackMode !== 'scheduled' || state.pollingSegments) return
+  state.pollingSegments = true
+  try {
+    const response = await fetch(`/api/segments?clientId=${encodeURIComponent(state.clientId)}`, {
+      cache: 'no-store'
+    })
+    if (!response.ok) throw new Error(`Segment manifest returned ${response.status}`)
+    const manifest = await response.json()
+
+    if (state.segmentEpoch !== manifest.epoch) {
+      stopScheduledSources()
+      state.scheduledSegments.clear()
+      state.segmentEpoch = manifest.epoch
+      state.epochStartAt = manifest.epochStartAt
+    }
+
+    const serverNow = Date.now() + state.serverOffsetMs
+    if (state.epochStartAt > serverNow) return
+
+    const retainedIds = new Set(manifest.segments.map((segment) => segment.id))
+    for (const id of state.scheduledSegments) {
+      if (!retainedIds.has(id)) state.scheduledSegments.delete(id)
+    }
+
+    for (const segment of manifest.segments) {
+      if (state.scheduledSegments.has(segment.id)) continue
+      state.scheduledSegments.add(segment.id)
+      if (segment.playAt <= serverNow + 35) continue
+
+      try {
+        const audioResponse = await fetch(`/segment/${segment.id}`, {
+          cache: 'no-store'
+        })
+        if (!audioResponse.ok) throw new Error(`Audio segment returned ${audioResponse.status}`)
+        const audioBuffer = await state.audioCtx.decodeAudioData(await audioResponse.arrayBuffer())
+        if (!state.playing || state.segmentEpoch !== manifest.epoch) break
+
+        const latestServerNow = Date.now() + state.serverOffsetMs
+        const outputLatency = state.audioCtx.outputLatency ?? state.audioCtx.baseLatency ?? 0
+        const startAt = state.audioCtx.currentTime + (segment.playAt - latestServerNow) / 1000 - outputLatency
+        if (startAt < state.audioCtx.currentTime + 0.015) continue
+
+        const source = state.audioCtx.createBufferSource()
+        source.buffer = audioBuffer
+        source.connect(audioBuffer.numberOfChannels === 1 ? state.masterGain : state.channelSplitter)
+        state.scheduledSources.add(source)
+        source.addEventListener('ended', () => state.scheduledSources.delete(source), { once: true })
+        source.start(startAt)
+      } catch (error) {
+        state.scheduledSegments.delete(segment.id)
+        els.streamNote.textContent = `Audio segment unavailable: ${error.message}`
+        els.streamNote.classList.remove('hidden')
+      }
+    }
+  } catch (error) {
+    if (state.playing) {
+      els.streamNote.textContent = `Reconnecting to synchronized audio: ${error.message}`
+      els.streamNote.classList.remove('hidden')
+    }
+  } finally {
+    state.pollingSegments = false
+  }
 }
 
 /* Adaptive Live Edge Monitor — locks audio playback to sub-100ms latency */
@@ -251,10 +377,25 @@ els.volume.addEventListener('input', () => {
   const val = Number(els.volume.value)
   state.userVolume = val / 100
   els.volumeVal.textContent = `${val}%`
-  
-  els.audioPlayer.volume = Math.min(1, state.userVolume)
+
+  els.audioPlayer.volume = state.masterGain ? 1 : Math.min(1, state.userVolume)
   if (state.masterGain) {
     state.masterGain.gain.value = state.userVolume
+  }
+})
+
+els.syncBtn.addEventListener('click', async () => {
+  els.syncBtn.disabled = true
+  try {
+    const response = await fetch('/api/sync/start', { method: 'POST' })
+    if (!response.ok) throw new Error(`Sync request returned ${response.status}`)
+    els.streamNote.textContent = 'All connected devices will restart together.'
+    els.streamNote.classList.remove('hidden')
+  } catch (error) {
+    els.streamNote.textContent = `Could not sync devices: ${error.message}`
+    els.streamNote.classList.remove('hidden')
+  } finally {
+    els.syncBtn.disabled = !state.scheduledPlaybackAvailable
   }
 })
 
@@ -268,7 +409,9 @@ els.copyBtn.addEventListener('click', async () => {
   }
   const original = els.copyBtn.textContent
   els.copyBtn.textContent = 'COPIED'
-  setTimeout(() => { els.copyBtn.textContent = original }, 1500)
+  setTimeout(() => {
+    els.copyBtn.textContent = original
+  }, 1500)
 })
 
 els.audioPlayer.addEventListener('error', () => {
@@ -289,24 +432,14 @@ async function refreshStatus() {
     els.urlBox.value = s.url
     els.clientCount.textContent = String(s.clients)
     els.streamMode.textContent = s.mode === 'static' ? 'TEST' : 'LIVE'
+    state.scheduledPlaybackAvailable = s.scheduledPlayback
+    els.syncBtn.disabled = !s.scheduledPlayback
+    els.latency.textContent = s.scheduledPlayback ? `${s.segmentMs + s.playoutDelayMs}MS` : '—'
 
-    els.securityNote.textContent = s.pinEnabled
-      ? 'PIN PROTECTED STREAM'
-      : 'SECURE LOCAL STREAM'
+    els.securityNote.textContent = s.pinEnabled ? 'PIN PROTECTED STREAM' : 'SECURE LOCAL STREAM'
 
     if (s.pinEnabled && !s.authed) showPinGate()
   } catch {}
-}
-
-async function measureLatency() {
-  const t0 = performance.now()
-  try {
-    await fetch('/api/time', { cache: 'no-store' })
-    const rtt = Math.round(performance.now() - t0)
-    els.latency.textContent = `${rtt}MS`
-  } catch {
-    els.latency.textContent = '—'
-  }
 }
 
 /* PIN overlay */
@@ -325,7 +458,7 @@ els.pinForm.addEventListener('submit', async (e) => {
     const r = await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ pin })
     })
     if (r.ok) {
       els.pinOverlay.classList.add('hidden')
@@ -345,8 +478,6 @@ els.pinForm.addEventListener('submit', async (e) => {
 async function init() {
   await refreshStatus()
   setInterval(refreshStatus, 4000)
-  setInterval(measureLatency, 8000)
-  measureLatency()
 }
 
 init()

@@ -1,5 +1,5 @@
-import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { test } from 'node:test'
 import { Segmenter } from '../src/segmenter.js'
 
 const BPS = 16000 // 128 kbps
@@ -30,7 +30,13 @@ test('keeps only the newest segments (ring eviction)', () => {
 
 test('WAV mode prepends the RIFF header to every segment', () => {
   const header = Buffer.from('RIFF____WAVEfmt ')
-  const seg = new Segmenter({ segmentMs: 1000, keep: 4, bytesPerSecond: 176400, header, contentType: 'audio/wav' })
+  const seg = new Segmenter({
+    segmentMs: 1000,
+    keep: 4,
+    bytesPerSecond: 176400,
+    header,
+    contentType: 'audio/wav'
+  })
   for (let i = 0; i < 30; i++) seg.push(Buffer.alloc(44100)) // 1.32 MB -> ~7.5s -> 7 segments
   const m = seg.manifest()
   assert.ok(m.liveId >= 6)
@@ -68,4 +74,47 @@ test('manifest exposes content type and rates', () => {
   assert.equal(m.contentType, 'audio/mpeg')
   assert.equal(m.bytesPerSecond, BPS)
   assert.equal(m.segmentMs, 1000)
+})
+
+test('splits PCM on exact frame-aligned WAV boundaries with valid headers', () => {
+  const seg = new Segmenter({
+    segmentMs: 100,
+    bytesPerSecond: 2000,
+    contentType: 'audio/wav',
+    wavFormat: { sampleRate: 1000, channels: 1, bits: 16 }
+  })
+
+  seg.push(Buffer.alloc(150))
+  seg.push(Buffer.alloc(150))
+  let manifest = seg.manifest()
+  assert.equal(manifest.segments.length, 1)
+
+  let first = seg.get(manifest.liveId)
+  assert.equal(first.toString('ascii', 0, 4), 'RIFF')
+  assert.equal(first.readUInt32LE(4), 236)
+  assert.equal(first.readUInt32LE(40), 200)
+  assert.equal(first.length, 244)
+  assert.equal(manifest.segments[0].dur, 0.1)
+
+  seg.push(Buffer.alloc(100))
+  manifest = seg.manifest()
+  assert.equal(manifest.segments.length, 2)
+  assert.equal(seg.get(manifest.liveId).readUInt32LE(40), 200)
+  assert.ok(manifest.segments.every((segment) => Number.isFinite(segment.playAt)))
+})
+
+test('carries partial PCM frames across incoming chunks', () => {
+  const seg = new Segmenter({
+    segmentMs: 100,
+    bytesPerSecond: 2000,
+    wavFormat: { sampleRate: 1000, channels: 1, bits: 16 }
+  })
+
+  seg.push(Buffer.alloc(199))
+  assert.equal(seg.liveId(), -1)
+  seg.push(Buffer.alloc(5))
+
+  assert.equal(seg.liveId(), 0)
+  assert.equal(seg.get(0).readUInt32LE(40), 200)
+  assert.equal(seg.current.bytes, 4)
 })

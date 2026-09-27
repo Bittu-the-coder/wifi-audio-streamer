@@ -1,170 +1,87 @@
-# 🎧 Wi-Fi Audio Streamer
+# Wi-Fi Audio Streamer
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Latency-%3C100ms-brightgreen?style=for-the-badge&logo=speedtest&logoColor=white" alt="Latency">
-  <img src="https://img.shields.io/badge/App--Required-NO-blue?style=for-the-badge&logo=googlechrome&logoColor=white" alt="No App Required">
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
-  <img src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/License-MIT-black?style=for-the-badge" alt="License">
-</p>
+Stream a computer's system audio to phones on the same Wi-Fi network. Phones use a browser; no companion app is required. Windows and Ubuntu are supported as the audio-capture host.
 
-> **Turn any smartphone into a wireless Bluetooth-like speaker for your PC over Wi-Fi.**  
-> Stream system sound with **ultra-low latency (<100ms)** without installing any apps on your phones—just scan a QR code and play in any browser!
+## Requirements
 
----
+- Node.js 20.11 or newer
+- FFmpeg available on `PATH`
+- Windows 10/11 with WASAPI, or Ubuntu with PipeWire/PulseAudio and `pactl`
+- Phones and host on the same local network
 
-![Wi-Fi Audio Streamer UI](docs/screenshot.png)
+## Install
 
----
+Windows PowerShell:
 
-## 📌 Table of Contents
-
-- [⭐ Why Star This Project?](#-why-star-this-project)
-- [⚡ Feature Comparison](#-feature-comparison)
-- [🚀 Features](#-features)
-- [🏗️ Architecture](#️-architecture)
-- [📋 Requirements](#-requirements)
-- [🎛️ Audio Device & VB-Cable Setup Guide](#️-audio-device--vb-cable-setup-guide)
-- [⚙️ Quick Start Guide](#️-quick-start-guide)
-- [🔧 Configuration (.env)](#-configuration-env)
-- [🧪 Testing](#-testing)
-- [🛡️ License](#️-license)
-
----
-
-## ⭐ Why Star This Project?
-
-- 🎬 **Watch Movies & YouTube in Bed**: Hear your laptop audio right next to your pillow using your phone.
-- 🔊 **Instant Wireless Multi-Speaker Setup**: Connect multiple phones simultaneously and set them as **LEFT** and **RIGHT** speakers for room-filling stereo sound.
-- ⚡ **Zero App Installation Needed**: Friends can join your PC audio stream instantly by scanning a QR code on Chrome, Safari, or Firefox.
-- 🎧 **No Extra Hardware Required**: Captures laptop sound via Windows WASAPI loopback or Virtual Cable.
-
----
-
-## ⚡ Feature Comparison
-
-| Feature | 🎧 Wi-Fi Audio Streamer | AudioRelay / SoundWire | Bluetooth Speakers |
-| :--- | :---: | :---: | :---: |
-| **Mobile App Needed?** | ❌ **No (Browser Only)** | ⚠️ Yes (APK Install) | ⚠️ Hardware Device |
-| **Multi-Phone Stereo Pairing** | ✅ **Yes (L / R / Stereo)** | ❌ Paid / Limited | ⚠️ Hardware Dependent |
-| **Latency** | ⚡ **<100ms** | ~100–200ms | ~150–300ms |
-| **Setup Time** | ⏱️ **Instant (Scan QR)** | ⏱️ Install APK + Pairing | ⏱️ BT Pairing Mode |
-| **100% Free & Open Source** | ✅ **Yes (MIT)** | ❌ Proprietary / Freemium | ❌ N/A |
-
----
-
-## 🚀 Features
-
-- **📱 Zero App Installs**: Clients just open a URL or scan a QR code in any browser.
-- **⚡ Ultra-Low Latency (<100ms)**: Built-in adaptive live-edge catch-up controller eliminates buffer lag.
-- **🔊 Stereo Channel Router**: Assign individual phones to act as **LEFT**, **RIGHT**, or **STEREO** channels.
-- **🎙️ Dual Capture Modes (WASAPI / DirectShow)**: Native Windows WASAPI loopback or Virtual Audio Cable capture.
-- **🎛️ Minimalist Monochrome UI**: Clean, high-contrast Black & White dark design with a real-time frequency spectrum visualizer.
-- **🔒 Optional PIN Gate**: Protect your stream on shared Wi-Fi networks.
-
----
-
-## 🏗️ Architecture
-
-```text
- [Windows Laptop / PC]
-   System Audio (Browser / YouTube / Media Player / Games)
-       ↓ Captured via WASAPI Loopback / VB-Audio Cable
-   [FFmpeg Low-Latency Engine]
-       ↓ Real-time stream (-fflags +nobuffer+fastseek -flags +low_delay)
-   [Node.js / Express Server]
-       ↓ Chunked HTTP Stream broadcast over local Wi-Fi
- [Phone 1 (Left Channel)]    [Phone 2 (Right Channel)]    [Phone N (Stereo)]
-   - WebAudio Bridge & Adaptive Live-Edge Catch-Up Controller (<100ms sync)
-```
-
----
-
-## 📋 Requirements
-
-- **Operating System**: Windows 10 or Windows 11.
-- **Node.js**: v20 or higher.
-- **FFmpeg**: Installed and available on your system `PATH`.
-  - *Install on Windows*: `winget install Gyan.FFmpeg` (then open a new terminal).
-
----
-
-## 🎛️ Audio Device & VB-Cable Setup Guide
-
-For maximum compatibility across all Windows audio drivers, you can use **VB-Audio Virtual Cable** to route 100% of PC system sound into the streamer.
-
-### Step 1: Install VB-Audio Virtual Cable
-1. Download the free driver from [VB-Audio Cable Official Website](https://vb-audio.com/Cable/).
-2. Extract the ZIP file and run `VBCABLE_Setup_x64.exe` as Administrator.
-3. Restart your PC if prompted.
-
-### Step 2: Set CABLE Input as Default Playback Device
-1. Press `Win + R` on your keyboard to open the **Run** dialog.
-2. Type `mmsys.cpl` and press **Enter** (this opens Windows Sound Control Panel).
-3. Under the **Playback** tab, locate **CABLE Input (VB-Audio Virtual Cable)**.
-4. Right-click **CABLE Input** and click **Set as Default Device**.
-5. Click **Apply** and **OK**.
-
-> 💡 *Now, all video and app audio playing on your PC will automatically route into the Wi-Fi Audio Streamer and broadcast directly to your connected phones!*
-
----
-
-## ⚙️ Quick Start Guide
-
-### 1. Clone & Install
-```bash
-git clone https://github.com/Bittu-the-coder/wifi-audio-streamer.git
-cd wifi-audio-streamer
+```powershell
+winget install Gyan.FFmpeg
+corepack enable
 pnpm install
+pnpm check:setup
+pnpm start
 ```
 
-### 2. Run Setup Diagnostics
-Verify that Node.js, FFmpeg, and audio devices are properly configured:
+Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install ffmpeg pulseaudio-utils
+corepack enable
+pnpm install
+pnpm check:setup
+pnpm start
+```
+
+The server prints a local URL and QR code. Open it on each phone, tap **CONNECT**, then tap **SYNC DEVICES** to align playback. Browser audio starts only after a user gesture.
+
+## Audio Capture
+
+`MODE=auto` uses live system-audio capture when FFmpeg is available; otherwise it plays a generated test tone. On Windows, the default uses WASAPI loopback from the current output device. On Ubuntu, the default uses the monitor source for the active PulseAudio/PipeWire output sink.
+
+To inspect audio sources:
+
+```bash
+pnpm list:devices
+```
+
+Set `CAPTURE_DEVICE` to a specific monitor/source when automatic selection is not right. On Windows, select DirectShow explicitly with `CAPTURE_FORMAT=dshow`. The setup doctor reports missing dependencies and audio sources:
+
 ```bash
 pnpm check:setup
 ```
 
-### 3. Start Streaming
-```bash
-pnpm start
-```
+## Latency and Sync
 
-### 4. Join Stream on Phone
-1. Open your phone camera and scan the **QR code** printed in the terminal or displayed on your laptop browser.
-2. Tap **CONNECT** on your phone!
+Audio is sent as uncompressed 16-bit PCM in short WAV segments. The default segment is 100 ms with a 400 ms playout cushion; this keeps phones on a shared playback clock while absorbing ordinary Wi-Fi jitter. Actual speaker delay also depends on the phone, browser, Wi-Fi quality, and any Bluetooth output connected to the phone. There is no zero-latency guarantee.
 
----
+Live capture applies adaptive FFmpeg noise reduction at a moderate default strength (`NOISE_REDUCTION=18`). Set it between `0` and `30`; use `0` to disable it or a lower value if speech sounds over-processed. Noise reduction cannot remove distortion or noise already baked into a recording.
 
-## 🔧 Configuration (`.env`)
+Increase `PLAYOUT_DELAY_MS` if playback stutters on a busy or weak network. Decrease it in small steps if the network is stable and lower delay matters more. Several phones can play together, but independent device clocks and speaker hardware prevent sample-perfect synchronization.
 
-You can create a `.env` file in the root directory to customize settings:
+## Configuration
 
-```ini
-# Server Settings
-PORT=8080
-HOST=0.0.0.0
+Copy `.env.example` to `.env`. Keep comments on their own lines; the simple `.env` reader does not support inline comments.
 
-# Capture Settings
-MODE=auto                   # 'auto' | 'ffmpeg' | 'static'
-CAPTURE_DEVICE=default      # 'default' for WASAPI loopback, or 'CABLE Output (VB-Audio Virtual Cable)'
-AUDIO_BITRATE=128k
-AUDIO_BUFFER_MS=20          # Low latency buffer target in ms
+| Setting            | Default   | Purpose                                       |
+| ------------------ | --------- | --------------------------------------------- |
+| `MODE`             | `auto`    | `auto`, `ffmpeg`, or `static`                 |
+| `FFMPEG_PATH`      | `ffmpeg`  | FFmpeg executable or full path                |
+| `CAPTURE_FORMAT`   | `auto`    | `auto`, `wasapi`, `dshow`, `pulse`, or `alsa` |
+| `CAPTURE_DEVICE`   | `default` | System output or an explicit capture source   |
+| `AUDIO_BUFFER_MS`  | `40`      | Capture input buffer target                   |
+| `NOISE_REDUCTION`  | `18`      | Adaptive noise reduction (`0` disables)       |
+| `SEGMENT_MS`       | `100`     | PCM segment duration                          |
+| `PLAYOUT_DELAY_MS` | `400`     | Shared scheduled-playback cushion             |
+| `SYNC_LEAD_MS`     | `2500`    | Countdown before a shared sync restart        |
+| `PORT`             | `8080`    | Web server port                               |
+| `HOST`             | `0.0.0.0` | Bind address                                  |
+| `LAN_IP`           | automatic | Override the address shown to phones          |
+| `AUTH_PIN`         | empty     | Optional shared PIN for the stream            |
 
-# Security (Optional)
-PIN=                        # Set a 4-digit PIN (e.g. PIN=1234)
-```
+Allow the selected port through the host firewall on private networks. For Ubuntu with UFW, for example: `sudo ufw allow 8080/tcp`. On Windows, allow Node.js on private networks when prompted.
 
----
+## Tests
 
-## 🧪 Testing
-
-Run the automated unit test suite:
 ```bash
 pnpm test
 ```
-
----
-
-## 🛡️ License
-
-Distributed under the **MIT License**. See `LICENSE` for details.

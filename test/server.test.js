@@ -1,10 +1,10 @@
-import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { createApp } from '../src/server.js'
+import { after, before, test } from 'node:test'
+import { createAuth } from '../src/auth.js'
 import { Broadcaster } from '../src/broadcaster.js'
 import { Segmenter } from '../src/segmenter.js'
-import { createAuth } from '../src/auth.js'
+import { createApp } from '../src/server.js'
 
 class FakeSource extends EventEmitter {
   constructor() {
@@ -17,10 +17,19 @@ class FakeSource extends EventEmitter {
     this.timer = setInterval(() => this.emit('data', Buffer.alloc(1024, 7)), 40)
     return this
   }
-  stop() { if (this.timer) clearInterval(this.timer) }
-  joinChunk() { return null }
+  stop() {
+    if (this.timer) clearInterval(this.timer)
+  }
+  joinChunk() {
+    return null
+  }
   info() {
-    return { type: 'fake', detail: 'fake-source', contentType: 'audio/mpeg', format: 'test stream' }
+    return {
+      type: 'fake',
+      detail: 'fake-source',
+      contentType: 'audio/mpeg',
+      format: 'test stream'
+    }
   }
 }
 
@@ -29,7 +38,7 @@ const config = {
   volume: 1,
   bufferTarget: 1.2,
   lanAddresses: ['127.0.0.1'],
-  pin: '',
+  pin: ''
 }
 
 // Track everything that needs cleanup so the test process can exit.
@@ -48,7 +57,7 @@ function makeApp({ pin = '', mode = 'static' } = {}) {
     broadcaster,
     auth: createAuth({ pin }),
     primaryUrl: 'http://127.0.0.1:8080',
-    onVolumeChange: () => {},
+    onVolumeChange: () => {}
   })
   return { app, source, broadcaster }
 }
@@ -146,7 +155,7 @@ test('PIN-protected server blocks /stream until a valid PIN cookie', async () =>
   const bad = await fetch(`${url}/api/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin: '0000' }),
+    body: JSON.stringify({ pin: '0000' })
   })
   assert.equal(bad.status, 403)
 
@@ -154,7 +163,7 @@ test('PIN-protected server blocks /stream until a valid PIN cookie', async () =>
   const ok = await fetch(`${url}/api/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin: '1234' }),
+    body: JSON.stringify({ pin: '1234' })
   })
   assert.equal(ok.status, 200)
   const setCookie = ok.headers.get('set-cookie')
@@ -176,7 +185,11 @@ test('PIN-protected server blocks /stream until a valid PIN cookie', async () =>
 
 test('segment endpoints serve the manifest and segment bytes', async () => {
   const { app } = makeApp()
-  const segmenter = new Segmenter({ segmentMs: 1000, keep: 4, bytesPerSecond: 16000 })
+  const segmenter = new Segmenter({
+    segmentMs: 1000,
+    keep: 4,
+    bytesPerSecond: 16000
+  })
   for (let i = 0; i < 20; i++) segmenter.push(Buffer.alloc(8000)) // 160 KB -> 10s
   // Rebuild the app with the segmenter wired in
   const b = new Broadcaster()
@@ -191,18 +204,21 @@ test('segment endpoints serve the manifest and segment bytes', async () => {
     auth: createAuth({}),
     primaryUrl: 'http://127.0.0.1:8080',
     onVolumeChange: () => {},
-    segmenter,
+    segmenter
   })
   const url = await listen(app2)
 
   const man = await (await fetch(`${url}/api/segments`)).json()
   assert.ok(man.liveId >= 9, `expected segments, got liveId ${man.liveId}`)
   assert.equal(man.edge, 1)
+  assert.ok(Number.isFinite(man.serverTime))
   assert.ok(man.segments.length >= 1)
+  assert.ok(Number.isFinite(man.segments[0].playAt))
 
   const res = await fetch(`${url}/segment/${man.liveId}`)
   assert.equal(res.status, 200)
   assert.equal(res.headers.get('content-type'), 'audio/mpeg')
+  assert.equal(res.headers.get('cache-control'), 'private, no-store')
   const bytes = Buffer.from(await res.arrayBuffer())
   assert.ok(bytes.length > 0)
 
@@ -210,12 +226,59 @@ test('segment endpoints serve the manifest and segment bytes', async () => {
   assert.equal(gone.status, 404)
 })
 
+test('segment and status routes follow a replaced live source', async () => {
+  const source = new FakeSource()
+  source.on('data', (chunk) => {})
+  source.start()
+  createdSources.push(source)
+
+  const oldSegmenter = new Segmenter({ segmentMs: 100, bytesPerSecond: 2000 })
+  const nextSegmenter = new Segmenter({
+    segmentMs: 100,
+    bytesPerSecond: 2000,
+    wavFormat: { sampleRate: 1000, channels: 1, bits: 16 },
+    contentType: 'audio/wav'
+  })
+  nextSegmenter.push(Buffer.alloc(200))
+  let activeSegmenter = oldSegmenter
+  const app = createApp({
+    config: { ...config, segmentMs: 100, playoutDelayMs: 50 },
+    source,
+    broadcaster: new Broadcaster(),
+    auth: createAuth({}),
+    primaryUrl: 'http://127.0.0.1:8080',
+    segmenter: oldSegmenter,
+    getSegmenter: () => activeSegmenter,
+    getSource: () => source
+  })
+  const url = await listen(app)
+
+  const before = await (await fetch(`${url}/api/segments`)).json()
+  assert.equal(before.scheduledPlayback, false)
+
+  activeSegmenter = nextSegmenter
+  const after = await (await fetch(`${url}/api/segments?clientId=test-device-123`)).json()
+  assert.equal(after.scheduledPlayback, true)
+  assert.equal(after.contentType, 'audio/wav')
+  assert.equal(after.epoch, 1)
+
+  const status = await (await fetch(`${url}/api/status`)).json()
+  assert.equal(status.scheduledPlayback, true)
+  assert.equal(status.clients, 1)
+})
+
 test('POST /api/sync/start begins a new epoch and rewinds the stream', async () => {
   // Wire a segmenter that the fake source feeds (like index.js does)
-  const segmenter = new Segmenter({ segmentMs: 200, keep: 8, bytesPerSecond: 16000 })
+  const segmenter = new Segmenter({
+    segmentMs: 200,
+    keep: 8,
+    bytesPerSecond: 16000
+  })
   const src = new FakeSource()
   let restarts = 0
-  src.restart = () => { restarts++ }
+  src.restart = () => {
+    restarts++
+  }
   src.on('data', (c) => segmenter.push(c))
   src.start()
   createdSources.push(src)
@@ -227,7 +290,7 @@ test('POST /api/sync/start begins a new epoch and rewinds the stream', async () 
     auth: createAuth({}),
     primaryUrl: 'http://127.0.0.1:8080',
     onVolumeChange: () => {},
-    segmenter,
+    segmenter
   })
   const url = await listen(app2)
 
@@ -259,14 +322,14 @@ test('POST /api/volume validates input and applies changes in ffmpeg mode', asyn
   const bad = await fetch(`${url}/api/volume`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ volume: 99 }),
+    body: JSON.stringify({ volume: 99 })
   })
   assert.equal(bad.status, 400)
 
   const ok = await fetch(`${url}/api/volume`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ volume: 0.8 }),
+    body: JSON.stringify({ volume: 0.8 })
   })
   assert.equal(ok.status, 200)
   const body = await ok.json()

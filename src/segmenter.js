@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { buildWavBuffer } from './sources/wav-generator.js'
 
 /**
  * Splits the continuous audio stream into short, independently-playable
@@ -15,15 +16,23 @@ export class Segmenter extends EventEmitter {
     keep = 16,
     bytesPerSecond = 16000,
     header = null, // WAV header to prepend to every segment (null for MP3)
-    contentType = 'audio/mpeg',
+    wavFormat = null,
+    playoutDelayMs = 400,
+    contentType = 'audio/mpeg'
   } = {}) {
     super()
     this.segmentMs = segmentMs
     this.keep = keep
     this.bytesPerSecond = bytesPerSecond
     this.header = header
+    this.wavFormat = wavFormat
+    this.playoutDelayMs = playoutDelayMs
     this.contentType = contentType
-    this.segmentBytes = Math.max(512, Math.round((bytesPerSecond * segmentMs) / 1000))
+    const alignment = wavFormat ? (wavFormat.channels * wavFormat.bits) / 8 : 1
+    this.frameAlignment = alignment
+    this.pendingBytes = Buffer.alloc(0)
+    const targetBytes = Math.max(alignment, Math.round((bytesPerSecond * segmentMs) / 1000))
+    this.segmentBytes = Math.max(alignment, targetBytes - (targetBytes % alignment))
 
     this.segments = new Map() // id -> Buffer
     this.ids = [] // ordered ids
@@ -32,17 +41,39 @@ export class Segmenter extends EventEmitter {
   }
 
   push(chunk) {
-    if (!this.current) this.current = { id: this.nextId, parts: [], bytes: 0 }
-    this.current.parts.push(chunk)
-    this.current.bytes += chunk.length
-    if (this.current.bytes >= this.segmentBytes) this._finalize()
+    if (this.frameAlignment > 1) {
+      if (this.pendingBytes.length) {
+        chunk = Buffer.concat([this.pendingBytes, chunk])
+        this.pendingBytes = Buffer.alloc(0)
+      }
+      const alignedLength = chunk.length - (chunk.length % this.frameAlignment)
+      this.pendingBytes = chunk.subarray(alignedLength)
+      chunk = chunk.subarray(0, alignedLength)
+    }
+
+    let offset = 0
+    while (offset < chunk.length) {
+      if (!this.current) this.current = { id: this.nextId, parts: [], bytes: 0 }
+      const length = Math.min(this.segmentBytes - this.current.bytes, chunk.length - offset)
+      this.current.parts.push(chunk.subarray(offset, offset + length))
+      this.current.bytes += length
+      offset += length
+      if (this.current.bytes === this.segmentBytes) this._finalize()
+    }
   }
 
   _finalize() {
     const c = this.current
     const payload = Buffer.concat(c.parts, c.bytes)
-    const buf = this.header ? Buffer.concat([this.header, payload]) : payload
-    this.segments.set(c.id, buf)
+    const buf = this.wavFormat
+      ? buildWavBuffer({ pcm: payload, ...this.wavFormat })
+      : this.header
+        ? Buffer.concat([this.header, payload])
+        : payload
+    this.segments.set(c.id, {
+      data: buf,
+      playAt: Date.now() + this.playoutDelayMs
+    })
     this.ids.push(c.id)
     while (this.ids.length > this.keep) this.segments.delete(this.ids.shift())
     this.current = null
@@ -59,6 +90,7 @@ export class Segmenter extends EventEmitter {
     const segments = this.ids.map((id) => ({
       id,
       dur: this._duration(id),
+      playAt: this.schedule(id)
     }))
     return {
       liveId: this.nextId - 1,
@@ -66,6 +98,8 @@ export class Segmenter extends EventEmitter {
       contentType: this.contentType,
       segmentMs: this.segmentMs,
       bytesPerSecond: this.bytesPerSecond,
+      playoutDelayMs: this.playoutDelayMs,
+      scheduledPlayback: Boolean(this.wavFormat)
     }
   }
 
@@ -74,19 +108,25 @@ export class Segmenter extends EventEmitter {
     this.segments = new Map()
     this.ids = []
     this.current = null
+    this.pendingBytes = Buffer.alloc(0)
     this.nextId = 0
     this.emit('reset')
   }
 
   get(id) {
-    const buf = this.segments.get(Number(id))
-    return buf ?? null
+    return this.segments.get(Number(id))?.data ?? null
+  }
+
+  schedule(id) {
+    return this.segments.get(Number(id))?.playAt ?? null
   }
 
   _duration(id) {
-    const buf = this.segments.get(id)
-    if (!buf) return this.segmentMs / 1000
-    const payload = buf.length - (this.header ? this.header.length : 0)
+    const segment = this.segments.get(id)
+    if (!segment) return this.segmentMs / 1000
+    const buf = segment.data
+    const headerBytes = this.wavFormat ? 44 : this.header ? this.header.length : 0
+    const payload = buf.length - headerBytes
     return payload / this.bytesPerSecond
   }
 }
