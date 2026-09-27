@@ -32,7 +32,7 @@ pnpm check:setup
 pnpm start
 ```
 
-The server prints a local URL and QR code. Open it on each phone, tap **CONNECT**, then tap **SYNC DEVICES** to align playback. Browser audio starts only after a user gesture.
+The server prints a local URL and QR code. Open it on each phone and tap **CONNECT**. Continuous streaming is the default; to align several phones, set `PLAYBACK_MODE=scheduled` in `.env`, restart the server, then tap **SYNC DEVICES**. Browser audio starts only after a user gesture.
 
 ## Audio Capture
 
@@ -52,31 +52,32 @@ pnpm check:setup
 
 ## Latency and Sync
 
-Audio is sent as uncompressed 16-bit PCM in short WAV segments. The default segment is 100 ms with a 400 ms playout cushion; this keeps phones on a shared playback clock while absorbing ordinary Wi-Fi jitter. Actual speaker delay also depends on the phone, browser, Wi-Fi quality, and any Bluetooth output connected to the phone. There is no zero-latency guarantee.
+`PLAYBACK_MODE=stream` sends uncompressed 16-bit PCM continuously for lower delay and fewer segment-boundary interruptions. `PLAYBACK_MODE=scheduled` uses short WAV segments and a playout cushion to keep phones on a shared playback clock; it trades latency for synchronization and jitter tolerance. Actual speaker delay also depends on the phone, browser, Wi-Fi quality, and any Bluetooth output. The on-screen network RTT is a request round trip, not end-to-end audio latency.
 
 Live capture applies adaptive FFmpeg noise reduction at a moderate default strength (`NOISE_REDUCTION=18`). Set it between `0` and `30`; use `0` to disable it or a lower value if speech sounds over-processed. Noise reduction cannot remove distortion or noise already baked into a recording.
 
-Increase `PLAYOUT_DELAY_MS` if playback stutters on a busy or weak network. Decrease it in small steps if the network is stable and lower delay matters more. Several phones can play together, but independent device clocks and speaker hardware prevent sample-perfect synchronization.
+`PLAYOUT_DELAY_MS` applies only to scheduled playback. Increase it if scheduled playback stutters on a busy or weak network; decrease it in small steps if the network is stable and lower delay matters more. Several phones can play together, but independent device clocks and speaker hardware prevent sample-perfect synchronization.
 
 ## Configuration
 
 Copy `.env.example` to `.env`. Keep comments on their own lines; the simple `.env` reader does not support inline comments.
 
-| Setting            | Default   | Purpose                                       |
-| ------------------ | --------- | --------------------------------------------- |
-| `MODE`             | `auto`    | `auto`, `ffmpeg`, or `static`                 |
-| `FFMPEG_PATH`      | `ffmpeg`  | FFmpeg executable or full path                |
-| `CAPTURE_FORMAT`   | `auto`    | `auto`, `wasapi`, `dshow`, `pulse`, or `alsa` |
-| `CAPTURE_DEVICE`   | `default` | System output or an explicit capture source   |
-| `AUDIO_BUFFER_MS`  | `40`      | Capture input buffer target                   |
-| `NOISE_REDUCTION`  | `18`      | Adaptive noise reduction (`0` disables)       |
-| `SEGMENT_MS`       | `100`     | PCM segment duration                          |
-| `PLAYOUT_DELAY_MS` | `400`     | Shared scheduled-playback cushion             |
-| `SYNC_LEAD_MS`     | `2500`    | Countdown before a shared sync restart        |
-| `PORT`             | `8080`    | Web server port                               |
-| `HOST`             | `0.0.0.0` | Bind address                                  |
-| `LAN_IP`           | automatic | Override the address shown to phones          |
-| `AUTH_PIN`         | empty     | Optional shared PIN for the stream            |
+| Setting            | Default   | Purpose                                                                 |
+| ------------------ | --------- | ----------------------------------------------------------------------- |
+| `MODE`             | `auto`    | `auto`, `ffmpeg`, or `static`                                           |
+| `PLAYBACK_MODE`    | `stream`  | `stream` for continuous playback; `scheduled` for shared segment timing |
+| `FFMPEG_PATH`      | `ffmpeg`  | FFmpeg executable or full path                                          |
+| `CAPTURE_FORMAT`   | `auto`    | `auto`, `wasapi`, `dshow`, `pulse`, or `alsa`                           |
+| `CAPTURE_DEVICE`   | `default` | System output or an explicit capture source                             |
+| `AUDIO_BUFFER_MS`  | `40`      | Capture input buffer target                                             |
+| `NOISE_REDUCTION`  | `18`      | Adaptive noise reduction (`0` disables)                                 |
+| `SEGMENT_MS`       | `100`     | PCM segment duration                                                    |
+| `PLAYOUT_DELAY_MS` | `400`     | Shared scheduled-playback cushion                                       |
+| `SYNC_LEAD_MS`     | `2500`    | Countdown before a shared sync restart                                  |
+| `PORT`             | `8080`    | Web server port                                                         |
+| `HOST`             | `0.0.0.0` | Bind address                                                            |
+| `LAN_IP`           | automatic | Override the address shown to phones                                    |
+| `AUTH_PIN`         | empty     | Optional shared PIN for the stream                                      |
 
 Allow the selected port through the host firewall on private networks. For Ubuntu with UFW, for example: `sudo ufw allow 8080/tcp`. On Windows, allow Node.js on private networks when prompted.
 

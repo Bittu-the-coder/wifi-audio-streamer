@@ -1,32 +1,32 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-export const ROOT = path.resolve(import.meta.dirname, '..')
-export const PUBLIC_DIR = path.join(ROOT, 'src', 'public')
-export const AUDIO_DIR = path.join(ROOT, 'audio')
+export const ROOT = path.resolve(import.meta.dirname, '..');
+export const PUBLIC_DIR = path.join(ROOT, 'src', 'public');
+export const AUDIO_DIR = path.join(ROOT, 'audio');
 
 /**
  * Tiny .env loader (no dependency). Existing process.env vars win.
  */
 export function loadDotEnv(file = path.join(ROOT, '.env')) {
-  if (!fs.existsSync(file)) return
+  if (!fs.existsSync(file)) return;
   for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
-    if (!m || m[1] === '') continue
-    const [, key, value] = m
-    if (process.env[key] === undefined) process.env[key] = value
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m || m[1] === '') continue;
+    const [, key, value] = m;
+    if (process.env[key] === undefined) process.env[key] = value;
   }
 }
 
 function int(value, fallback) {
-  const n = Number.parseInt(value, 10)
-  return Number.isFinite(n) ? n : fallback
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function float(value, fallback) {
-  const n = Number.parseFloat(value)
-  return Number.isFinite(n) ? n : fallback
+  const n = Number.parseFloat(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 /**
@@ -35,21 +35,21 @@ function float(value, fallback) {
  * they're excluded.
  */
 export function getLanInterfaces() {
-  const out = []
-  const virtualRe = /wsl|vethernet|hyper-v|virtual|loopback|vmware/i
+  const out = [];
+  const virtualRe = /wsl|vethernet|hyper-v|virtual|loopback|vmware/i;
   for (const [name, ifaces] of Object.entries(os.networkInterfaces())) {
-    if (virtualRe.test(name)) continue
+    if (virtualRe.test(name)) continue;
     for (const iface of ifaces ?? []) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        out.push({ name, address: iface.address })
+        out.push({ name, address: iface.address });
       }
     }
   }
-  return out
+  return out;
 }
 
 export function getLanAddresses() {
-  return getLanInterfaces().map((i) => i.address)
+  return getLanInterfaces().map((i) => i.address);
 }
 
 /**
@@ -57,20 +57,28 @@ export function getLanAddresses() {
  */
 export function pickLanAddress(addresses = getLanAddresses()) {
   const isPrivate = (a) => {
-    const [x, y] = a.split('.').map(Number)
-    return x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
-  }
-  return addresses.find(isPrivate) ?? addresses[0] ?? '127.0.0.1'
+    const [x, y] = a.split('.').map(Number);
+    return (
+      x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
+    );
+  };
+  return addresses.find(isPrivate) ?? addresses[0] ?? '127.0.0.1';
 }
 
 export function loadConfig(env = process.env) {
-  const mode = (env.MODE || 'auto').toLowerCase()
+  const mode = (env.MODE || 'auto').toLowerCase();
   if (!['auto', 'static', 'ffmpeg'].includes(mode)) {
-    throw new Error(`Invalid MODE "${mode}" — use auto, static or ffmpeg`)
+    throw new Error(`Invalid MODE "${mode}" — use auto, static or ffmpeg`);
+  }
+  const playbackMode = (env.PLAYBACK_MODE || 'stream').toLowerCase();
+  if (!['stream', 'scheduled'].includes(playbackMode)) {
+    throw new Error(
+      `Invalid PLAYBACK_MODE "${playbackMode}" — use stream or scheduled`
+    );
   }
 
-  const port = int(env.PORT, 8080)
-  const host = env.HOST || '0.0.0.0'
+  const port = int(env.PORT, 8080);
+  const host = env.HOST || '0.0.0.0';
 
   return {
     port,
@@ -79,6 +87,7 @@ export function loadConfig(env = process.env) {
     // detected LAN IP). Useful if detection picks the wrong adapter.
     lanIp: env.LAN_IP || '',
     mode,
+    playbackMode,
     // Static-file mode
     audioFile: env.AUDIO_FILE || '', // '' => auto-pick (test.mp3, test.wav, or generate)
     testAudioSeconds: int(env.TEST_AUDIO_SECONDS, 4),
@@ -104,12 +113,12 @@ export function loadConfig(env = process.env) {
     playoutDelayMs: int(env.PLAYOUT_DELAY_MS, 400),
     fallbackTimeoutMs: int(env.FALLBACK_TIMEOUT, 6000), // auto-mode: wait for first ffmpeg data
     bufferTarget: float(env.BUFFER_TARGET, 1.2), // seconds of buffered audio before client plays
-    pace: float(env.PACE, 1.04) // static loop runs slightly faster than real-time
-  }
+    pace: float(env.PACE, 1.04), // static loop runs slightly faster than real-time
+  };
 }
 
 export function formatBytes(n) {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }

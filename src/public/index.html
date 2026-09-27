@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#000000" />
     <title>Wi-Fi Audio Stream</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -23,7 +26,12 @@
           <span class="logo-symbol">●</span>
           <span class="logo-text">WIFI AUDIO</span>
         </div>
-        <div id="statusPill" class="status-badge offline" role="status" aria-live="polite">
+        <div
+          id="statusPill"
+          class="status-badge offline"
+          role="status"
+          aria-live="polite"
+        >
           <span class="badge-dot" aria-hidden="true"></span>
           <span id="statusText">READY</span>
         </div>
@@ -33,9 +41,19 @@
         <!-- Minimalist Audio Player Card -->
         <section class="card player-card">
           <div class="visualizer-box">
-            <canvas id="visualizer" width="500" height="120" aria-label="Audio Visualizer"></canvas>
+            <canvas
+              id="visualizer"
+              width="500"
+              height="120"
+              aria-label="Audio Visualizer"
+            ></canvas>
 
-            <button id="joinBtn" class="play-btn" type="button" aria-label="Play / Pause Audio Stream">
+            <button
+              id="joinBtn"
+              class="play-btn"
+              type="button"
+              aria-label="Play / Pause Audio Stream"
+            >
               <span id="playIcon" class="btn-icon">▶</span>
               <span id="joinLabel" class="btn-text">CONNECT</span>
             </button>
@@ -47,9 +65,19 @@
           <div class="control-row">
             <span class="row-label">CHANNEL</span>
             <div class="btn-group" id="channelGroup">
-              <button class="grp-btn active" data-channel="stereo" type="button">STEREO</button>
-              <button class="grp-btn" data-channel="left" type="button">LEFT</button>
-              <button class="grp-btn" data-channel="right" type="button">RIGHT</button>
+              <button
+                class="grp-btn active"
+                data-channel="stereo"
+                type="button"
+              >
+                STEREO
+              </button>
+              <button class="grp-btn" data-channel="left" type="button">
+                LEFT
+              </button>
+              <button class="grp-btn" data-channel="right" type="button">
+                RIGHT
+              </button>
             </div>
           </div>
 
@@ -71,7 +99,9 @@
             />
           </div>
           <div class="sync-control">
-            <button id="syncBtn" class="btn-action" type="button" disabled>SYNC DEVICES</button>
+            <button id="syncBtn" class="btn-action" type="button" disabled>
+              SYNC DEVICES
+            </button>
           </div>
         </section>
 
@@ -83,7 +113,7 @@
           </div>
           <div class="stat-box">
             <span class="stat-num" id="latency">—</span>
-            <span class="stat-lbl">BUFFER</span>
+            <span class="stat-lbl">NETWORK RTT</span>
           </div>
           <div class="stat-box">
             <span class="stat-num" id="streamMode">LIVE</span>
@@ -95,11 +125,23 @@
         <section class="card pair-card">
           <span class="card-title">PAIR DEVICE</span>
           <div class="url-group">
-            <input id="urlBox" class="url-input" type="text" readonly aria-label="Stream URL" />
+            <input
+              id="urlBox"
+              class="url-input"
+              type="text"
+              readonly
+              aria-label="Stream URL"
+            />
             <button id="copyBtn" class="btn-action" type="button">COPY</button>
           </div>
           <div class="qr-box">
-            <img id="qrImg" src="/api/qr" alt="QR Code" width="150" height="150" />
+            <img
+              id="qrImg"
+              src="/api/qr"
+              alt="QR Code"
+              width="150"
+              height="150"
+            />
           </div>
           <span class="hint">Connect phones to the same Wi-Fi network</span>
         </section>
@@ -111,7 +153,12 @@
     </div>
 
     <!-- PIN Modal -->
-    <div id="pinOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div
+      id="pinOverlay"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+    >
       <form id="pinForm" class="modal-card" novalidate>
         <span class="modal-title">ENTER PIN</span>
         <p class="modal-hint">Stream is PIN protected by the host</p>

@@ -1,5 +1,5 @@
-import { EventEmitter } from 'node:events'
-import crypto from 'node:crypto'
+import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 /**
  * Fans a single audio source out to many HTTP clients.
@@ -10,23 +10,28 @@ import crypto from 'node:crypto'
  */
 export class Broadcaster extends EventEmitter {
   constructor({ maxBacklog = 512 * 1024, wsServer = null } = {}) {
-    super()
-    this.maxBacklog = maxBacklog
-    this.clients = new Map()
-    this.wsServer = wsServer
-    this.totalBytes = 0
+    super();
+    this.maxBacklog = maxBacklog;
+    this.clients = new Map();
+    this.wsServer = wsServer;
+    this.totalBytes = 0;
+    this.bytesDelivered = 0;
 
     if (this.wsServer) {
-      this.wsServer.on('connect', (id) => this.emit('connect', id, this.count))
-      this.wsServer.on('disconnect', (id) => this.emit('disconnect', id, this.count))
+      this.wsServer.on('connect', (id) => this.emit('connect', id, this.count));
+      this.wsServer.on('disconnect', (id) =>
+        this.emit('disconnect', id, this.count)
+      );
     }
   }
 
   setWsServer(wsServer) {
-    this.wsServer = wsServer
+    this.wsServer = wsServer;
     if (this.wsServer) {
-      this.wsServer.on('connect', (id) => this.emit('connect', id, this.count))
-      this.wsServer.on('disconnect', (id) => this.emit('disconnect', id, this.count))
+      this.wsServer.on('connect', (id) => this.emit('connect', id, this.count));
+      this.wsServer.on('disconnect', (id) =>
+        this.emit('disconnect', id, this.count)
+      );
     }
   }
 
@@ -35,65 +40,69 @@ export class Broadcaster extends EventEmitter {
    * before the live stream so WAV clients get a valid header first.
    */
   addClient(res, { contentType, initialChunk = null } = {}) {
-    const id = crypto.randomUUID()
+    const id = crypto.randomUUID();
     res.writeHead(200, {
       'Content-Type': contentType,
       'Cache-Control': 'no-store, no-cache, must-revalidate',
       Pragma: 'no-cache',
       'X-Accel-Buffering': 'no',
       'Accept-Ranges': 'none',
-    })
-    res.flushHeaders()
-    if (initialChunk) res.write(initialChunk)
+    });
+    res.flushHeaders();
+    if (initialChunk) {
+      res.write(initialChunk);
+      this.bytesDelivered += initialChunk.length;
+    }
 
-    const client = { id, res, connectedAt: Date.now(), droppedBytes: 0 }
-    this.clients.set(id, client)
-    this.emit('connect', id, this.count)
+    const client = { id, res, connectedAt: Date.now(), droppedBytes: 0 };
+    this.clients.set(id, client);
+    this.emit('connect', id, this.count);
 
-    res.on('close', () => this.removeClient(id))
-    return id
+    res.on('close', () => this.removeClient(id));
+    return id;
   }
 
   removeClient(id) {
-    if (!this.clients.has(id)) return
-    this.clients.delete(id)
-    this.emit('disconnect', id, this.count)
+    if (!this.clients.has(id)) return;
+    this.clients.delete(id);
+    this.emit('disconnect', id, this.count);
   }
 
   push(chunk) {
-    this.totalBytes += chunk.length
+    this.totalBytes += chunk.length;
 
     // 1. WebSocket broadcast
     if (this.wsServer) {
-      this.wsServer.broadcast(chunk)
+      this.bytesDelivered += this.wsServer.broadcast(chunk) ?? 0;
     }
 
     // 2. HTTP response broadcast
     if (this.clients.size > 0) {
       for (const [id, client] of this.clients) {
         if (client.res.writableEnded || client.res.destroyed) {
-          this.removeClient(id)
-          continue
+          this.removeClient(id);
+          continue;
         }
         if (client.res.writableLength > this.maxBacklog) {
-          client.droppedBytes += chunk.length
-          continue
+          client.droppedBytes += chunk.length;
+          continue;
         }
-        client.res.write(chunk)
+        client.res.write(chunk);
+        this.bytesDelivered += chunk.length;
       }
     }
   }
 
   hasClients() {
-    return this.count > 0
+    return this.count > 0;
   }
 
   get count() {
-    const wsCount = this.wsServer ? this.wsServer.count : 0
-    return this.clients.size + wsCount
+    const wsCount = this.wsServer ? this.wsServer.count : 0;
+    return this.clients.size + wsCount;
   }
 
   stats() {
-    return { clients: this.count, totalBytes: this.totalBytes }
+    return { clients: this.count, totalBytes: this.totalBytes };
   }
 }
